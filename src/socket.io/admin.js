@@ -2,6 +2,8 @@
 
 var async = require('async');
 var winston = require('winston');
+var fs = require('fs');
+var path = require('path');
 var nconf = require('nconf');
 
 var meta = require('../meta');
@@ -38,6 +40,7 @@ var SocketAdmin = {
 	analytics: {},
 	logs: {},
 	errors: {},
+	uploads: {},
 };
 
 SocketAdmin.before = function (socket, method, data, next) {
@@ -55,7 +58,7 @@ SocketAdmin.before = function (socket, method, data, next) {
 	], next);
 };
 
-SocketAdmin.reload = function (socket, data, callback) {
+SocketAdmin.restart = function (socket, data, callback) {
 	events.log({
 		type: 'restart',
 		uid: socket.uid,
@@ -65,7 +68,7 @@ SocketAdmin.reload = function (socket, data, callback) {
 	callback();
 };
 
-SocketAdmin.restart = function (socket, data, callback) {
+SocketAdmin.reload = function (socket, data, callback) {
 	async.waterfall([
 		function (next) {
 			require('../meta/build').buildAll(next);
@@ -150,11 +153,11 @@ SocketAdmin.plugins.upgrade = function (socket, data, callback) {
 };
 
 SocketAdmin.widgets.set = function (socket, data, callback) {
-	if (!data) {
+	if (!Array.isArray(data)) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 
-	widgets.setArea(data, callback);
+	async.eachSeries(data, widgets.setArea, callback);
 };
 
 SocketAdmin.config.set = function (socket, data, callback) {
@@ -225,17 +228,14 @@ SocketAdmin.settings.clearSitemapCache = function (socket, data, callback) {
 };
 
 SocketAdmin.email.test = function (socket, data, callback) {
-	var site_title = meta.config.title || 'NodeBB';
 	var payload = {
-		subject: '[' + site_title + '] Test Email',
-		site_title: site_title,
-		url: nconf.get('url'),
+		subject: 'Test Email',
 	};
 
 	switch (data.template) {
 	case 'digest':
 		userDigest.execute({
-			interval: 'day',
+			interval: 'alltime',
 			subscribers: [socket.uid],
 		}, callback);
 		break;
@@ -252,7 +252,7 @@ SocketAdmin.email.test = function (socket, data, callback) {
 	case 'welcome':
 		userEmail.sendValidationEmail(socket.uid, {
 			force: 1,
-		});
+		}, callback);
 		break;
 
 	default:
@@ -337,6 +337,15 @@ SocketAdmin.deleteAllSessions = function (socket, data, callback) {
 SocketAdmin.reloadAllSessions = function (socket, data, callback) {
 	websockets.in('uid_' + socket.uid).emit('event:livereload');
 	callback();
+};
+
+SocketAdmin.uploads.delete = function (socket, pathToFile, callback) {
+	pathToFile = path.join(nconf.get('upload_path'), pathToFile);
+	if (!pathToFile.startsWith(nconf.get('upload_path'))) {
+		return callback(new Error('[[error:invalid-path]]'));
+	}
+
+	fs.unlink(pathToFile, callback);
 };
 
 module.exports = SocketAdmin;

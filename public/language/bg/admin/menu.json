@@ -9,11 +9,15 @@
 
 	"section-manage": "Управление",
 	"manage/categories": "Категории",
+	"manage/privileges": "Правомощия",
 	"manage/tags": "Етикети",
 	"manage/users": "Потребители",
+	"manage/admins-mods": "Администратори и модератори",
 	"manage/registration": "Регистрационна опашка",
+	"manage/post-queue": "Опашка за публикации",
 	"manage/groups": "Групи",
 	"manage/ip-blacklist": "Черен списък за IP адреси",
+	"manage/uploads": "Качвания",
 
 	"section-settings": "Настройки",
 	"settings/general": "Общи",
@@ -38,7 +42,7 @@
 	"section-appearance": "Външен вид",
 	"appearance/themes": "Теми",
 	"appearance/skins": "Облици",
-	"appearance/customise": "Персонализиран HTML и CSS",
+	"appearance/customise": "Персонализирано съдържание (HTML/JS/CSS)",
 
 	"section-extend": "Разширяване",
 	"extend/plugins": "Добавки",
@@ -59,16 +63,19 @@
 	"development/logger": "Система на журнала",
 	"development/info": "Информация",
 
-	"reload-forum": "Презареждане на форума",
+	"rebuild-and-restart-forum": "Повторно изграждане и рестартиране на форума",
 	"restart-forum": "Рестартиране на форума",
 	"logout": "Изход",
 	"view-forum": "Преглед на форума",
 
-	"search.placeholder": "Търсене…",
+	"search.placeholder": "Търсене на настройки",
 	"search.no-results": "Няма резултати…",
 	"search.search-forum": "Търсене във форума за <strong></strong>",
 	"search.keep-typing": "Продължете да пишете, за да видите още резултати…",
 	"search.start-typing": "Започнете да пишете, за да получите резултати…",
 
-	"connection-lost": "Връзката към %1 беше прекъсната. опитваме се да Ви свържем отново…"
+	"connection-lost": "Връзката към %1 беше прекъсната. опитваме се да Ви свържем отново…",
+
+	"alerts.version": "Използва се <strong>NodeBB версия %1</strong>",
+	"alerts.upgrade": "Обновяване до v%1"
 }

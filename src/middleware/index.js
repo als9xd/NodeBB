@@ -2,11 +2,14 @@
 
 var async = require('async');
 var path = require('path');
+var fs = require('fs');
 var csrf = require('csurf');
 var validator = require('validator');
 var nconf = require('nconf');
 var ensureLoggedIn = require('connect-ensure-login');
 var toobusy = require('toobusy-js');
+var Benchpress = require('benchpressjs');
+var LRU = require('lru-cache');
 
 var plugins = require('../plugins');
 var meta = require('../meta');
@@ -20,6 +23,10 @@ var controllers = {
 	api: require('./../controllers/api'),
 	helpers: require('../controllers/helpers'),
 };
+
+var delayCache = LRU({
+	maxAge: 1000 * 60,
+});
 
 var middleware = module.exports;
 
@@ -52,12 +59,12 @@ middleware.pageView = function (req, res, next) {
 
 	plugins.fireHook('action:middleware.pageView', { req: req });
 
-	if (req.user) {
-		user.updateLastOnlineTime(req.user.uid);
+	if (req.loggedIn) {
+		user.updateLastOnlineTime(req.uid);
 		if (req.path.startsWith('/api/users') || req.path.startsWith('/users')) {
-			user.updateOnlineUsers(req.user.uid, next);
+			user.updateOnlineUsers(req.uid, next);
 		} else {
-			user.updateOnlineUsers(req.user.uid);
+			user.updateOnlineUsers(req.uid);
 			next();
 		}
 	} else {
@@ -92,19 +99,20 @@ middleware.routeTouchIcon = function (req, res) {
 	if (meta.config['brand:touchIcon'] && validator.isURL(meta.config['brand:touchIcon'])) {
 		return res.redirect(meta.config['brand:touchIcon']);
 	}
-	var iconPath = '../../public';
+	var iconPath = '';
 	if (meta.config['brand:touchIcon']) {
-		iconPath += meta.config['brand:touchIcon'].replace(/assets\/uploads/, 'uploads');
+		iconPath = path.join(nconf.get('upload_path'), meta.config['brand:touchIcon'].replace(/assets\/uploads/, ''));
 	} else {
-		iconPath += '/logo.png';
+		iconPath = path.join(nconf.get('base_dir'), 'public/logo.png');
 	}
-	return res.sendFile(path.join(__dirname, iconPath), {
+
+	return res.sendFile(iconPath, {
 		maxAge: req.app.enabled('cache') ? 5184000000 : 0,
 	});
 };
 
 middleware.privateTagListing = function (req, res, next) {
-	if (!req.user && parseInt(meta.config.privateTagListing, 10) === 1) {
+	if (!req.loggedIn && parseInt(meta.config.privateTagListing, 10) === 1) {
 		controllers.helpers.notAllowed(req, res);
 	} else {
 		next();
@@ -135,7 +143,7 @@ function expose(exposedField, method, field, req, res, next) {
 }
 
 middleware.privateUploads = function (req, res, next) {
-	if (req.user || parseInt(meta.config.privateUploads, 10) !== 1) {
+	if (req.loggedIn || parseInt(meta.config.privateUploads, 10) !== 1) {
 		return next();
 	}
 	if (req.path.startsWith(nconf.get('relative_path') + '/assets/uploads/files')) {
@@ -180,4 +188,72 @@ middleware.processTimeagoLocales = function (req, res, next) {
 			});
 		},
 	], next);
+};
+
+middleware.delayLoading = function (req, res, next) {
+	// Introduces an artificial delay during load so that brute force attacks are effectively mitigated
+
+	// Add IP to cache so if too many requests are made, subsequent requests are blocked for a minute
+	var timesSeen = delayCache.get(req.ip) || 0;
+	if (timesSeen > 10) {
+		return res.sendStatus(429);
+	}
+	delayCache.set(req.ip, timesSeen += 1);
+
+	setTimeout(next, 1000);
+};
+
+var viewsDir = nconf.get('views_dir');
+var workingCache = {};
+
+middleware.templatesOnDemand = function (req, res, next) {
+	var filePath = req.filePath || path.join(viewsDir, req.path);
+	if (!filePath.endsWith('.js')) {
+		return next();
+	}
+	var tplPath = filePath.replace(/\.js$/, '.tpl');
+	if (workingCache[filePath]) {
+		workingCache[filePath].push(next);
+		return;
+	}
+
+	async.waterfall([
+		function (cb) {
+			file.exists(filePath, cb);
+		},
+		function (exists, cb) {
+			if (exists) {
+				return next();
+			}
+
+			// need to check here again
+			// because compilation could have started since last check
+			if (workingCache[filePath]) {
+				workingCache[filePath].push(next);
+				return;
+			}
+
+			workingCache[filePath] = [next];
+			fs.readFile(tplPath, 'utf8', cb);
+		},
+		function (source, cb) {
+			Benchpress.precompile({
+				source: source,
+				minify: global.env !== 'development',
+			}, cb);
+		},
+		function (compiled, cb) {
+			if (!compiled) {
+				return cb(new Error('[[error:templatesOnDemand.compiled-template-empty, ' + tplPath + ']]'));
+			}
+			fs.writeFile(filePath, compiled, cb);
+		},
+	], function (err) {
+		var arr = workingCache[filePath];
+		workingCache[filePath] = null;
+
+		arr.forEach(function (callback) {
+			callback(err);
+		});
+	});
 };

@@ -10,7 +10,7 @@
 	"custom-class": "自定义 Class",
 	"num-recent-replies": "最近回复数",
 	"ext-link": "外部链接",
-	"is-section": "将该板块作为段落",
+	"is-section": "将该版块作为段落",
 	"upload-image": "上传图片",
 	"delete-image": "移除",
 	"category-image": "版块图片",
@@ -60,10 +60,12 @@
 	"alert.copy-success": "设置已复制！",
 	"alert.set-parent-category": "设置父版块",
 	"alert.updated": "版块已更新",
-	"alert.updated-success": "版块ID %1 成功更新。",
+	"alert.updated-success": "版块 ID %1 成功更新。",
 	"alert.upload-image": "上传版块图片",
 	"alert.find-user": "查找用户",
 	"alert.user-search": "在这里查找用户…",
 	"alert.find-group": "查找群组",
-	"alert.group-search": "在此处搜索群组..."
+	"alert.group-search": "在此处搜索群组...",
+	"collapse-all": "全部折叠",
+	"expand-all": "全部展开"
 }

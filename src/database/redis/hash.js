@@ -102,7 +102,7 @@ module.exports = function (redisClient, module) {
 
 	module.deleteObjectField = function (key, field, callback) {
 		callback = callback || function () {};
-		if (field === null) {
+		if (key === undefined || key === null || field === undefined || field === null) {
 			return setImmediate(callback);
 		}
 		redisClient.hdel(key, field, function (err) {
@@ -117,14 +117,26 @@ module.exports = function (redisClient, module) {
 	};
 
 	module.incrObjectField = function (key, field, callback) {
-		redisClient.hincrby(key, field, 1, callback);
+		module.incrObjectFieldBy(key, field, 1, callback);
 	};
 
 	module.decrObjectField = function (key, field, callback) {
-		redisClient.hincrby(key, field, -1, callback);
+		module.incrObjectFieldBy(key, field, -1, callback);
 	};
 
 	module.incrObjectFieldBy = function (key, field, value, callback) {
-		redisClient.hincrby(key, field, value, callback);
+		value = parseInt(value, 10);
+		if (!key || isNaN(value)) {
+			return callback(null, null);
+		}
+		if (Array.isArray(key)) {
+			var multi = redisClient.multi();
+			key.forEach(function (key) {
+				multi.hincrby(key, field, value);
+			});
+			multi.exec(callback);
+		} else {
+			redisClient.hincrby(key, field, value, callback);
+		}
 	};
 };

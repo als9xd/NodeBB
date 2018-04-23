@@ -14,6 +14,50 @@ var middleware = require('../middleware');
 
 var helpers = module.exports;
 
+helpers.noScriptErrors = function (req, res, error, httpStatus) {
+	if (req.body.noscript !== 'true') {
+		return res.status(httpStatus).send(error);
+	}
+
+	var middleware = require('../middleware');
+	var httpStatusString = httpStatus.toString();
+	middleware.buildHeader(req, res, function () {
+		res.status(httpStatus).render(httpStatusString, {
+			path: req.path,
+			loggedIn: req.loggedIn,
+			error: error,
+			returnLink: true,
+			title: '[[global:' + httpStatusString + '.title]]',
+		});
+	});
+};
+
+helpers.validFilters = { '': true, new: true, watched: true, unreplied: true };
+
+helpers.buildFilters = function (url, filter) {
+	return [{
+		name: '[[unread:all-topics]]',
+		url: url,
+		selected: filter === '',
+		filter: '',
+	}, {
+		name: '[[unread:new-topics]]',
+		url: url + '/new',
+		selected: filter === 'new',
+		filter: 'new',
+	}, {
+		name: '[[unread:watched-topics]]',
+		url: url + '/watched',
+		selected: filter === 'watched',
+		filter: 'watched',
+	}, {
+		name: '[[unread:unreplied-topics]]',
+		url: url + '/unreplied',
+		selected: filter === 'unreplied',
+		filter: 'unreplied',
+	}];
+};
+
 helpers.notAllowed = function (req, res, error) {
 	plugins.fireHook('filter:helpers.notAllowed', {
 		req: req,
@@ -23,11 +67,11 @@ helpers.notAllowed = function (req, res, error) {
 		if (err) {
 			return winston.error(err);
 		}
-		if (req.uid) {
+		if (req.loggedIn) {
 			if (res.locals.isAPI) {
 				res.status(403).json({
 					path: req.path.replace(/^\/api/, ''),
-					loggedIn: !!req.uid,
+					loggedIn: req.loggedIn,
 					error: error,
 					title: '[[global:403.title]]',
 				});
@@ -35,7 +79,7 @@ helpers.notAllowed = function (req, res, error) {
 				middleware.buildHeader(req, res, function () {
 					res.status(403).render('403', {
 						path: req.path,
-						loggedIn: !!req.uid,
+						loggedIn: req.loggedIn,
 						error: error,
 						title: '[[global:403.title]]',
 					});
@@ -85,7 +129,7 @@ helpers.buildCategoryBreadcrumbs = function (cid, callback) {
 			return callback(err);
 		}
 
-		if (!meta.config.homePageRoute && meta.config.homePageCustom) {
+		if (meta.config.homePageRoute && meta.config.homePageRoute !== 'categories') {
 			breadcrumbs.unshift({
 				text: '[[global:header.categories]]',
 				url: nconf.get('relative_path') + '/categories',
@@ -135,6 +179,9 @@ helpers.buildTitle = function (pageTitle) {
 };
 
 helpers.getWatchedCategories = function (uid, selectedCid, callback) {
+	if (selectedCid && !Array.isArray(selectedCid)) {
+		selectedCid = [selectedCid];
+	}
 	async.waterfall([
 		function (next) {
 			user.getWatchedCategories(uid, next);
@@ -149,14 +196,30 @@ helpers.getWatchedCategories = function (uid, selectedCid, callback) {
 			categoryData = categoryData.filter(function (category) {
 				return category && !category.link;
 			});
-
-			var selectedCategory;
+			var selectedCategory = [];
+			var selectedCids = [];
 			categoryData.forEach(function (category) {
-				category.selected = parseInt(category.cid, 10) === parseInt(selectedCid, 10);
+				category.selected = selectedCid ? selectedCid.indexOf(String(category.cid)) !== -1 : false;
 				if (category.selected) {
-					selectedCategory = category;
+					selectedCategory.push(category);
+					selectedCids.push(parseInt(category.cid, 10));
 				}
 			});
+			selectedCids.sort(function (a, b) {
+				return a - b;
+			});
+
+			if (selectedCategory.length > 1) {
+				selectedCategory = {
+					icon: 'fa-plus',
+					name: '[[unread:multiple-categories-selected]]',
+					bgColor: '#ddd',
+				};
+			} else if (selectedCategory.length === 1) {
+				selectedCategory = selectedCategory[0];
+			} else {
+				selectedCategory = undefined;
+			}
 
 			var categoriesData = [];
 			var tree = categories.getTree(categoryData, 0);
@@ -165,7 +228,7 @@ helpers.getWatchedCategories = function (uid, selectedCid, callback) {
 				recursive(category, categoriesData, '');
 			});
 
-			next(null, { categories: categoriesData, selectedCategory: selectedCategory });
+			next(null, { categories: categoriesData, selectedCategory: selectedCategory, selectedCids: selectedCids });
 		},
 	], callback);
 };

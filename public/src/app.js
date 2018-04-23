@@ -9,9 +9,25 @@ app.widgets = {};
 app.cacheBuster = null;
 
 (function () {
-	var showWelcomeMessage = !!utils.params().loggedin;
+	var params = utils.params();
+	var showWelcomeMessage = !!params.loggedin;
+	var registerMessage = params.register;
 
-	templates.setGlobal('config', config);
+	require(['benchpress'], function (Benchpress) {
+		Benchpress.setGlobal('config', config);
+		if (Object.defineProperty) {
+			Object.defineProperty(window, 'templates', {
+				configurable: true,
+				enumerable: true,
+				get: function () {
+					console.warn('[deprecated] Accessing benchpress (formerly known as templates.js) globally is deprecated. Use `require(["benchpress"], function (Benchpress) { ... })` instead');
+					return Benchpress;
+				},
+			});
+		} else {
+			window.templates = Benchpress;
+		}
+	});
 
 	app.cacheBuster = config['cache-buster'];
 
@@ -35,7 +51,8 @@ app.cacheBuster = null;
 			app.handleSearch();
 		}
 
-		$('body').on('click', '#new_topic', function () {
+		$('body').on('click', '#new_topic', function (e) {
+			e.preventDefault();
 			app.newTopic();
 		});
 
@@ -58,7 +75,7 @@ app.cacheBuster = null;
 
 		socket.removeAllListeners('event:nodebb.ready');
 		socket.on('event:nodebb.ready', function (data) {
-			if (!app.cacheBuster || app.cacheBuster !== data['cache-buster']) {
+			if ((data.hostname === app.upstreamHost) && (!app.cacheBuster || app.cacheBuster !== data['cache-buster'])) {
 				app.cacheBuster = data['cache-buster'];
 
 				app.alert({
@@ -89,7 +106,10 @@ app.cacheBuster = null;
 		});
 	};
 
-	app.logout = function () {
+	app.logout = function (e) {
+		if (e) {
+			e.preventDefault();
+		}
 		$(window).trigger('action:app.logout');
 
 		/*
@@ -260,7 +280,9 @@ app.cacheBuster = null;
 		app.replaceSelfLinks();
 
 		// Scroll back to top of page
-		window.scrollTo(0, 0);
+		if (!ajaxify.isCold()) {
+			window.scrollTo(0, 0);
+		}
 	};
 
 	app.showMessages = function () {
@@ -270,9 +292,12 @@ app.cacheBuster = null;
 				title: '[[global:welcome_back]] ' + app.user.username + '!',
 				message: '[[global:you_have_successfully_logged_in]]',
 			},
+			register: {
+				format: 'modal',
+			},
 		};
 
-		function showAlert(type) {
+		function showAlert(type, message) {
 			switch (messages[type].format) {
 			case 'alert':
 				app.alert({
@@ -285,7 +310,7 @@ app.cacheBuster = null;
 
 			case 'modal':
 				require(['translator'], function (translator) {
-					translator.translate(messages[type].message, function (translated) {
+					translator.translate(message || messages[type].message, function (translated) {
 						bootbox.alert({
 							title: messages[type].title,
 							message: translated,
@@ -300,6 +325,12 @@ app.cacheBuster = null;
 			showWelcomeMessage = false;
 			$(document).ready(function () {
 				showAlert('login');
+			});
+		}
+		if (registerMessage) {
+			$(document).ready(function () {
+				showAlert('register', decodeURIComponent(registerMessage));
+				registerMessage = false;
 			});
 		}
 	};
@@ -422,6 +453,9 @@ app.cacheBuster = null;
 			title = config.titleLayout.replace(/&#123;/g, '{').replace(/&#125;/g, '}')
 				.replace('{pageTitle}', function () { return title; })
 				.replace('{browserTitle}', function () { return config.browserTitle; });
+
+			// Allow translation strings in title on ajaxify (#5927)
+			title = translator.unescape(title);
 
 			translator.translate(title, function (translated) {
 				titleObj.titles[0] = translated;
@@ -608,7 +642,7 @@ app.cacheBuster = null;
 	};
 
 	app.parseAndTranslate = function (template, blockName, data, callback) {
-		require(['translator'], function (translator) {
+		require(['translator', 'benchpress'], function (translator, Benchpress) {
 			function translate(html, callback) {
 				translator.translate(html, function (translatedHTML) {
 					translatedHTML = translator.unescape(translatedHTML);
@@ -617,13 +651,13 @@ app.cacheBuster = null;
 			}
 
 			if (typeof blockName === 'string') {
-				templates.parse(template, blockName, data, function (html) {
+				Benchpress.parse(template, blockName, data, function (html) {
 					translate(html, callback);
 				});
 			} else {
 				callback = data;
 				data = blockName;
-				templates.parse(template, data, function (html) {
+				Benchpress.parse(template, data, function (html) {
 					translate(html, callback);
 				});
 			}

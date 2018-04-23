@@ -63,10 +63,10 @@ describe('Flags', function () {
 					type: 'post',
 					description: 'Test flag',
 				};
-
+				assert(flagData);
 				for (var key in compare) {
 					if (compare.hasOwnProperty(key)) {
-						assert.ok(flagData[key]);
+						assert.ok(flagData[key], 'undefined key ' + key);
 						assert.equal(flagData[key], compare[key]);
 					}
 				}
@@ -140,10 +140,10 @@ describe('Flags', function () {
 					description: 'Test flag',
 					state: 'open',
 				};
-
+				assert(flagData);
 				for (var key in compare) {
 					if (compare.hasOwnProperty(key)) {
-						assert.ok(flagData[key]);
+						assert.ok(flagData[key], 'undefined key ' + key);
 						assert.equal(flagData[key], compare[key]);
 					}
 				}
@@ -364,7 +364,7 @@ describe('Flags', function () {
 		});
 
 		it('should not pass validation if flag threshold is set and user rep does not meet it', function (done) {
-			Meta.configs.set('privileges:flag', '50', function (err) {
+			Meta.configs.set('min:rep:flag', '50', function (err) {
 				assert.ifError(err);
 
 				Flags.validate({
@@ -374,7 +374,7 @@ describe('Flags', function () {
 				}, function (err) {
 					assert.ok(err);
 					assert.strictEqual('[[error:not-enough-reputation-to-flag]]', err.message);
-					Meta.configs.set('privileges:flag', 0, done);
+					Meta.configs.set('min:rep:flag', 0, done);
 				});
 			});
 		});
@@ -442,7 +442,7 @@ describe('Flags', function () {
 		it('should retrieve a list of notes, from newest to oldest', function (done) {
 			Flags.getNotes(1, function (err, notes) {
 				assert.ifError(err);
-				assert(notes[0].datetime > notes[1].datetime);
+				assert(notes[0].datetime > notes[1].datetime, notes[0].datetime + '-' + notes[1].datetime);
 				assert.strictEqual('this is the second note', notes[0].content);
 				done();
 			});

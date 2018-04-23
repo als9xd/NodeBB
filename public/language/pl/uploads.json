@@ -1,6 +1,6 @@
 {
     "uploading-file": "Wysyłanie pliku...",
-    "select-file-to-upload": "Zaznacz plik do wgrania!",
-    "upload-success": "Pomyślnie załadowano plik!",
-    "maximum-file-size": "Maksymalna wielkość %1 kb"
+    "select-file-to-upload": "Zaznacz plik do wysłania!",
+    "upload-success": "Plik został wysłany!",
+    "maximum-file-size": "Maksymalnie %1 kb"
 }

@@ -6,8 +6,6 @@ var shim = require('../public/src/modules/translator.js');
 var Translator = shim.Translator;
 var db = require('./mocks/databasemock');
 
-require('../src/languages').init(function () {});
-
 describe('Translator shim', function () {
 	describe('.translate()', function () {
 		it('should translate correctly', function (done) {
@@ -113,6 +111,15 @@ describe('new Translator(language)', function () {
 			var key = '[[global:403.login, <strong>test</strong>]]';
 			return translator.translate(key).then(function (translated) {
 				assert.strictEqual(translated, 'Perhaps you should <a href=\'&lt;strong&gt;test&lt;/strong&gt;/login\'>try logging in</a>?');
+			});
+		});
+
+		it('should not unescape html in parameters', function () {
+			var translator = Translator.create('en-GB');
+
+			var key = '[[pages:tag, some&amp;tag]]';
+			return translator.translate(key).then(function (translated) {
+				assert.strictEqual(translated, 'Topics tagged under &quot;some&amp;tag&quot;');
 			});
 		});
 

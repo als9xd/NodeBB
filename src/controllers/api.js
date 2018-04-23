@@ -17,9 +17,8 @@ var apiController = module.exports;
 
 apiController.loadConfig = function (req, callback) {
 	var config = {};
-	config.environment = process.env.NODE_ENV;
 	config.relative_path = nconf.get('relative_path');
-	config.version = nconf.get('version');
+	config.upload_url = nconf.get('upload_url');
 	config.siteTitle = validator.escape(String(meta.config.title || meta.config.browserTitle || 'NodeBB'));
 	config.browserTitle = validator.escape(String(meta.config.browserTitle || meta.config.title || 'NodeBB'));
 	config.titleLayout = (meta.config.titleLayout || '{pageTitle} | {browserTitle}').replace(/{/g, '&#123;').replace(/}/g, '&#125;');
@@ -32,7 +31,6 @@ apiController.loadConfig = function (req, callback) {
 	config.maximumTagsPerTopic = parseInt(meta.config.maximumTagsPerTopic || 5, 10);
 	config.minimumTagLength = meta.config.minimumTagLength || 3;
 	config.maximumTagLength = meta.config.maximumTagLength || 15;
-	config.hasImageUploadPlugin = plugins.hasListeners('filter:uploadImage');
 	config.useOutgoingLinksPage = parseInt(meta.config.useOutgoingLinksPage, 10) === 1;
 	config.allowGuestSearching = parseInt(meta.config.allowGuestSearching, 10) === 1;
 	config.allowGuestUserSearching = parseInt(meta.config.allowGuestUserSearching, 10) === 1;
@@ -42,6 +40,7 @@ apiController.loadConfig = function (req, callback) {
 	config.usePagination = parseInt(meta.config.usePagination, 10) === 1;
 	config.disableChat = parseInt(meta.config.disableChat, 10) === 1;
 	config.disableChatMessageEditing = parseInt(meta.config.disableChatMessageEditing, 10) === 1;
+	config.maximumChatMessageLength = parseInt(meta.config.maximumChatMessageLength, 10) || 1000;
 	config.socketioTransports = nconf.get('socket.io:transports') || ['polling', 'websocket'];
 	config.websocketAddress = nconf.get('socket.io:address') || '';
 	config.maxReconnectionAttempts = meta.config.maxReconnectionAttempts || 5;
@@ -62,6 +61,8 @@ apiController.loadConfig = function (req, callback) {
 	config.searchEnabled = plugins.hasListeners('filter:search.query');
 	config.bootswatchSkin = meta.config.bootswatchSkin || 'noskin';
 	config.defaultBootswatchSkin = meta.config.bootswatchSkin || 'noskin';
+	config.enablePostHistory = parseInt(meta.config.enablePostHistory || 1, 10) === 1;
+	config.notificationAlertTimeout = parseInt(meta.config.notificationAlertTimeout, 10) || 5000;
 
 	if (config.useOutgoingLinksPage) {
 		config.outgoingLinksWhitelist = meta.config['outgoingLinks:whitelist'];
@@ -79,7 +80,7 @@ apiController.loadConfig = function (req, callback) {
 
 	async.waterfall([
 		function (next) {
-			if (!req.uid) {
+			if (!req.loggedIn) {
 				return next(null, config);
 			}
 			user.getSettings(req.uid, next);
@@ -89,6 +90,7 @@ apiController.loadConfig = function (req, callback) {
 			config.topicsPerPage = settings.topicsPerPage;
 			config.postsPerPage = settings.postsPerPage;
 			config.userLang = (req.query.lang ? validator.escape(String(req.query.lang)) : null) || settings.userLang || config.defaultLang;
+			config.acpLang = (req.query.lang ? validator.escape(String(req.query.lang)) : null) || settings.acpLang;
 			config.openOutgoingLinksInNewTab = settings.openOutgoingLinksInNewTab;
 			config.topicPostSort = settings.topicPostSort || config.topicPostSort;
 			config.categoryTopicSort = settings.categoryTopicSort || config.categoryTopicSort;

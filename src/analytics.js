@@ -100,7 +100,7 @@ Analytics.writeData = function (callback) {
 
 	async.parallel(dbQueue, function (err) {
 		if (err) {
-			winston.error('[analytics] Encountered error while writing analytics to data store: ' + err.message);
+			winston.error('[analytics] Encountered error while writing analytics to data store', err);
 		}
 		callback(err);
 	});
@@ -211,3 +211,9 @@ Analytics.getErrorAnalytics = function (callback) {
 	}, callback);
 };
 
+Analytics.getBlacklistAnalytics = function (callback) {
+	async.parallel({
+		daily: async.apply(Analytics.getDailyStatsForSet, 'analytics:blacklist', Date.now(), 7),
+		hourly: async.apply(Analytics.getHourlyStatsForSet, 'analytics:blacklist', Date.now(), 24),
+	}, callback);
+};

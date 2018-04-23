@@ -71,9 +71,9 @@ describe('Groups', function () {
 
 	describe('.list()', function () {
 		it('should list the groups present', function (done) {
-			Groups.getGroupsFromSet('groups:createtime', 0, 0, -1, function (err, groups) {
+			Groups.getGroupsFromSet('groups:visible:createtime', 0, 0, -1, function (err, groups) {
 				assert.ifError(err);
-				assert.equal(groups.length, 7);
+				assert.equal(groups.length, 4);
 				done();
 			});
 		});
@@ -94,6 +94,14 @@ describe('Groups', function () {
 				assert.strictEqual(groupObj.memberCount, 1);
 				assert.equal(typeof groupObj.members[0], 'object');
 
+				done();
+			});
+		});
+
+		it('should return null if group does not exist', function (done) {
+			Groups.get('doesnotexist', {}, function (err, groupObj) {
+				assert.ifError(err);
+				assert.strictEqual(groupObj, null);
 				done();
 			});
 		});
@@ -257,6 +265,47 @@ describe('Groups', function () {
 			});
 		});
 
+		it('should create a hidden group if hidden is 1', function (done) {
+			Groups.create({
+				name: 'hidden group',
+				hidden: '1',
+			}, function (err) {
+				assert.ifError(err);
+				db.isSortedSetMember('groups:visible:memberCount', 'visible group', function (err, isMember) {
+					assert.ifError(err);
+					assert(!isMember);
+					done();
+				});
+			});
+		});
+
+		it('should create a visible group if hidden is 0', function (done) {
+			Groups.create({
+				name: 'visible group',
+				hidden: '0',
+			}, function (err) {
+				assert.ifError(err);
+				db.isSortedSetMember('groups:visible:memberCount', 'visible group', function (err, isMember) {
+					assert.ifError(err);
+					assert(isMember);
+					done();
+				});
+			});
+		});
+
+		it('should create a visible group if hidden is not passed in', function (done) {
+			Groups.create({
+				name: 'visible group 2',
+			}, function (err) {
+				assert.ifError(err);
+				db.isSortedSetMember('groups:visible:memberCount', 'visible group 2', function (err, isMember) {
+					assert.ifError(err);
+					assert(isMember);
+					done();
+				});
+			});
+		});
+
 		it('should fail to create group with duplicate group name', function (done) {
 			Groups.create({ name: 'foo' }, function (err) {
 				assert(err);
@@ -375,8 +424,9 @@ describe('Groups', function () {
 			Groups.destroy('foobar?', function (err) {
 				assert.ifError(err);
 
-				Groups.get('foobar?', {}, function (err) {
-					assert(err, 'Group still exists!');
+				Groups.get('foobar?', {}, function (err, groupObj) {
+					assert.ifError(err);
+					assert.strictEqual(groupObj, null);
 
 					done();
 				});

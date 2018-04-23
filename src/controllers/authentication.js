@@ -14,6 +14,7 @@ var plugins = require('../plugins');
 var utils = require('../utils');
 var Password = require('../password');
 var translator = require('../translator');
+var helpers = require('./helpers');
 
 var sockets = require('../socket.io');
 
@@ -41,7 +42,7 @@ authenticationController.register = function (req, res) {
 				return next(new Error('[[error:invalid-email]]'));
 			}
 
-			if (!userData.username || userData.username.length < meta.config.minimumUsernameLength) {
+			if (!userData.username || userData.username.length < meta.config.minimumUsernameLength || utils.slugify(userData.username).length < meta.config.minimumUsernameLength) {
 				return next(new Error('[[error:username-too-short]]'));
 			}
 
@@ -49,25 +50,22 @@ authenticationController.register = function (req, res) {
 				return next(new Error('[[error:username-too-long]]'));
 			}
 
+			if (userData.password !== userData['password-confirm']) {
+				return next(new Error('[[user:change_password_error_match]]'));
+			}
+
 			user.isPasswordValid(userData.password, next);
 		},
 		function (next) {
-			user.shouldQueueUser(req.ip, next);
-		},
-		function (queue, next) {
 			res.locals.processLogin = true;	// set it to false in plugin if you wish to just register only
-			plugins.fireHook('filter:register.check', { req: req, res: res, userData: userData, queue: queue }, next);
+			plugins.fireHook('filter:register.check', { req: req, res: res, userData: userData }, next);
 		},
-		function (data, next) {
-			if (data.queue) {
-				addToApprovalQueue(req, userData, next);
-			} else {
-				registerAndLoginUser(req, res, userData, next);
-			}
+		function (result, next) {
+			registerAndLoginUser(req, res, userData, next);
 		},
 	], function (err, data) {
 		if (err) {
-			return res.status(400).send(err.message);
+			return helpers.noScriptErrors(req, res, err.message, 400);
 		}
 
 		if (data.uid && req.body.userLang) {
@@ -96,10 +94,24 @@ function registerAndLoginUser(req, res, userData, callback) {
 			}
 			userData.register = true;
 			req.session.registration = userData;
+
+			if (req.body.noscript === 'true') {
+				return res.redirect(nconf.get('relative_path') + '/register/complete');
+			}
 			return res.json({ referrer: nconf.get('relative_path') + '/register/complete' });
 		},
 		function (next) {
-			user.create(userData, next);
+			user.shouldQueueUser(req.ip, next);
+		},
+		function (queue, next) {
+			plugins.fireHook('filter:register.shouldQueue', { req: req, res: res, userData: userData, queue: queue }, next);
+		},
+		function (data, next) {
+			if (data.queue) {
+				addToApprovalQueue(req, userData, callback);
+			} else {
+				user.create(userData, next);
+			}
 		},
 		function (_uid, next) {
 			uid = _uid;
@@ -146,9 +158,11 @@ authenticationController.registerComplete = function (req, res, next) {
 			return memo;
 		}, []);
 
-		var done = function () {
+		var done = function (err, data) {
 			delete req.session.registration;
-
+			if (!err && data && data.message) {
+				return res.redirect(nconf.get('relative_path') + '/?register=' + encodeURIComponent(data.message));
+			}
 			if (req.session.returnTo) {
 				res.redirect(req.session.returnTo);
 			} else {
@@ -200,22 +214,22 @@ authenticationController.login = function (req, res, next) {
 	} else if (loginWith.indexOf('username') !== -1 && !validator.isEmail(req.body.username)) {
 		continueLogin(req, res, next);
 	} else {
-		res.status(500).send('[[error:wrong-login-type-' + loginWith + ']]');
+		var err = '[[error:wrong-login-type-' + loginWith + ']]';
+		helpers.noScriptErrors(req, res, err, 500);
 	}
 };
 
 function continueLogin(req, res, next) {
 	passport.authenticate('local', function (err, userData, info) {
 		if (err) {
-			return res.status(403).send(err.message);
+			return helpers.noScriptErrors(req, res, err.message, 403);
 		}
 
 		if (!userData) {
 			if (typeof info === 'object') {
 				info = '[[error:invalid-username-or-password]]';
 			}
-
-			return res.status(403).send(info);
+			return helpers.noScriptErrors(req, res, info, 403);
 		}
 
 		var passwordExpiry = userData.passwordExpiry !== undefined ? parseInt(userData.passwordExpiry, 10) : null;
@@ -235,7 +249,7 @@ function continueLogin(req, res, next) {
 			req.session.passwordExpired = true;
 			user.reset.generate(userData.uid, function (err, code) {
 				if (err) {
-					return res.status(403).send(err.message);
+					return helpers.noScriptErrors(req, res, err.message, 403);
 				}
 
 				res.status(200).send(nconf.get('relative_path') + '/reset/' + code);
@@ -243,16 +257,21 @@ function continueLogin(req, res, next) {
 		} else {
 			authenticationController.doLogin(req, userData.uid, function (err) {
 				if (err) {
-					return res.status(403).send(err.message);
+					return helpers.noScriptErrors(req, res, err.message, 403);
 				}
 
+				var destination;
 				if (!req.session.returnTo) {
-					res.status(200).send(nconf.get('relative_path') + '/');
+					destination = nconf.get('relative_path') + '/';
 				} else {
-					var next = req.session.returnTo;
+					destination = req.session.returnTo;
 					delete req.session.returnTo;
+				}
 
-					res.status(200).send(next);
+				if (req.body.noscript === 'true') {
+					res.redirect(destination + '?loggedin');
+				} else {
+					res.status(200).send(destination);
 				}
 			});
 		}
@@ -274,27 +293,31 @@ authenticationController.doLogin = function (req, uid, callback) {
 };
 
 authenticationController.onSuccessfulLogin = function (req, uid, callback) {
-	callback = callback || function () {};
 	var uuid = utils.generateUUID();
-	req.session.meta = {};
-
-	delete req.session.forceLogin;
-
-	// Associate IP used during login with user account
-	user.logIP(uid, req.ip);
-	req.session.meta.ip = req.ip;
-
-	// Associate metadata retrieved via user-agent
-	req.session.meta = _.extend(req.session.meta, {
-		uuid: uuid,
-		datetime: Date.now(),
-		platform: req.useragent.platform,
-		browser: req.useragent.browser,
-		version: req.useragent.version,
-	});
 
 	async.waterfall([
 		function (next) {
+			meta.blacklist.test(req.ip, next);
+		},
+		function (next) {
+			user.logIP(uid, req.ip, next);
+		},
+		function (next) {
+			req.session.meta = {};
+
+			delete req.session.forceLogin;
+			// Associate IP used during login with user account
+			req.session.meta.ip = req.ip;
+
+			// Associate metadata retrieved via user-agent
+			req.session.meta = _.extend(req.session.meta, {
+				uuid: uuid,
+				datetime: Date.now(),
+				platform: req.useragent.platform,
+				browser: req.useragent.browser,
+				version: req.useragent.version,
+			});
+
 			async.parallel([
 				function (next) {
 					user.auth.addSession(uid, req.sessionID, next);
@@ -316,7 +339,17 @@ authenticationController.onSuccessfulLogin = function (req, uid, callback) {
 			plugins.fireHook('action:user.loggedIn', { uid: uid, req: req });
 			next();
 		},
-	], callback);
+	], function (err) {
+		if (err) {
+			req.session.destroy();
+		}
+
+		if (typeof callback === 'function') {
+			callback(err);
+		} else {
+			return false;
+		}
+	});
 };
 
 authenticationController.localLogin = function (req, username, password, next) {
@@ -384,7 +417,7 @@ authenticationController.localLogin = function (req, username, password, next) {
 };
 
 authenticationController.logout = function (req, res, next) {
-	if (!req.uid || !req.sessionID) {
+	if (!req.loggedIn || !req.sessionID) {
 		return res.status(200).send('not-logged-in');
 	}
 
@@ -394,8 +427,11 @@ authenticationController.logout = function (req, res, next) {
 		},
 		function (next) {
 			req.logout();
-			req.session.destroy();
-
+			req.session.destroy(function (err) {
+				next(err);
+			});
+		},
+		function (next) {
 			user.setUserField(req.uid, 'lastonline', Date.now() - 300000, next);
 		},
 		function (next) {
@@ -404,7 +440,11 @@ authenticationController.logout = function (req, res, next) {
 		function () {
 			// Force session check for all connected socket.io clients with the same session id
 			sockets.in('sess_' + req.sessionID).emit('checkSession', 0);
-			res.status(200).send('');
+			if (req.body.noscript === 'true') {
+				res.redirect(nconf.get('relative_path') + '/');
+			} else {
+				res.status(200).send('');
+			}
 		},
 	], next);
 };

@@ -13,8 +13,8 @@ var user = require('../src/user');
 var groups = require('../src/groups');
 var privileges = require('../src/privileges');
 var meta = require('../src/meta');
+var socketUser = require('../src/socket.io/user');
 var helpers = require('./helpers');
-
 
 describe('Upload Controllers', function () {
 	var tid;
@@ -62,7 +62,7 @@ describe('Upload Controllers', function () {
 				assert.ifError(err);
 				jar = _jar;
 				csrf_token = _csrf_token;
-				privileges.categories.give(['upload:post:file'], cid, 'registered-users', done);
+				privileges.global.give(['upload:post:file'], 'registered-users', done);
 			});
 		});
 
@@ -78,11 +78,10 @@ describe('Upload Controllers', function () {
 		});
 
 		it('should upload an image to a post', function (done) {
-			helpers.uploadFile(nconf.get('url') + '/api/post/upload', path.join(__dirname, '../test/files/test.png'), { cid: cid }, jar, csrf_token, function (err, res, body) {
+			helpers.uploadFile(nconf.get('url') + '/api/post/upload', path.join(__dirname, '../test/files/test.png'), {}, jar, csrf_token, function (err, res, body) {
 				assert.ifError(err);
 				assert.equal(res.statusCode, 200);
 				assert(Array.isArray(body));
-				assert(body[0].path);
 				assert(body[0].url);
 				done();
 			});
@@ -91,11 +90,10 @@ describe('Upload Controllers', function () {
 		it('should resize and upload an image to a post', function (done) {
 			var oldValue = meta.config.maximumImageWidth;
 			meta.config.maximumImageWidth = 10;
-			helpers.uploadFile(nconf.get('url') + '/api/post/upload', path.join(__dirname, '../test/files/test.png'), { cid: cid }, jar, csrf_token, function (err, res, body) {
+			helpers.uploadFile(nconf.get('url') + '/api/post/upload', path.join(__dirname, '../test/files/test.png'), {}, jar, csrf_token, function (err, res, body) {
 				assert.ifError(err);
 				assert.equal(res.statusCode, 200);
 				assert(Array.isArray(body));
-				assert(body[0].path);
 				assert(body[0].url);
 				meta.config.maximumImageWidth = oldValue;
 				done();
@@ -107,12 +105,11 @@ describe('Upload Controllers', function () {
 			meta.config.allowFileUploads = 1;
 			var oldValue = meta.config.allowedFileExtensions;
 			meta.config.allowedFileExtensions = 'png,jpg,bmp,html';
-			helpers.uploadFile(nconf.get('url') + '/api/post/upload', path.join(__dirname, '../test/files/503.html'), { cid: cid }, jar, csrf_token, function (err, res, body) {
+			helpers.uploadFile(nconf.get('url') + '/api/post/upload', path.join(__dirname, '../test/files/503.html'), {}, jar, csrf_token, function (err, res, body) {
 				meta.config.allowedFileExtensions = oldValue;
 				assert.ifError(err);
 				assert.equal(res.statusCode, 200);
 				assert(Array.isArray(body));
-				assert(body[0].path);
 				assert(body[0].url);
 				done();
 			});
@@ -148,8 +145,21 @@ describe('Upload Controllers', function () {
 				done();
 			});
 		});
-	});
 
+		it('should not allow non image uploads', function (done) {
+			socketUser.updateCover({ uid: 1 }, { uid: 1, imageData: 'data:text/html;base64,PHN2Zy9vbmxvYWQ9YWxlcnQoMik+' }, function (err) {
+				assert.equal(err.message, '[[error:invalid-image]]');
+				done();
+			});
+		});
+
+		it('should not allow non image uploads', function (done) {
+			socketUser.uploadCroppedPicture({ uid: 1 }, { uid: 1, imageData: 'data:text/html;base64,PHN2Zy9vbmxvYWQ9YWxlcnQoMik+' }, function (err) {
+				assert.equal(err.message, '[[error:invalid-image]]');
+				done();
+			});
+		});
+	});
 
 	describe('admin uploads', function () {
 		var jar;

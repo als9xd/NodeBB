@@ -3,7 +3,6 @@
 
 var async = require('async');
 var _ = require('lodash');
-var S = require('string');
 var winston = require('winston');
 
 var meta = require('../meta');
@@ -13,6 +12,8 @@ var plugins = require('../plugins');
 var utils = require('../utils');
 
 module.exports = function (Topics) {
+	var stripTeaserTags = utils.stripTags.concat(['img']);
+
 	Topics.getTeasers = function (topics, uid, callback) {
 		if (typeof uid === 'function') {
 			winston.warn('[Topics.getTeasers] this usage is deprecated please provide uid');
@@ -91,8 +92,7 @@ module.exports = function (Topics) {
 					if (tidToPost[topic.tid]) {
 						tidToPost[topic.tid].index = meta.config.teaserPost === 'first' ? 1 : counts[index];
 						if (tidToPost[topic.tid].content) {
-							var s = S(tidToPost[topic.tid].content);
-							tidToPost[topic.tid].content = s.stripTags.apply(s, utils.stripTags).s;
+							tidToPost[topic.tid].content = utils.stripHTMLTags(tidToPost[topic.tid].content, stripTeaserTags);
 						}
 					}
 					return tidToPost[topic.tid];

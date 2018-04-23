@@ -61,8 +61,9 @@ module.exports = function (Categories) {
 					'topics:tag',
 					'posts:edit',
 					'posts:delete',
+					'posts:upvote',
+					'posts:downvote',
 					'topics:delete',
-					'upload:post:image',
 				];
 
 				async.series([
@@ -156,7 +157,7 @@ module.exports = function (Categories) {
 		async.waterfall([
 			function (next) {
 				plugins.fireHook('filter:categories.copyPrivilegesFrom', {
-					privileges: privileges.privilegeList,
+					privileges: privileges.privilegeList.slice(),
 					fromCid: fromCid,
 					toCid: toCid,
 				}, next);

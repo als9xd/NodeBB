@@ -1,7 +1,7 @@
 'use strict';
 
 
-define('notifications', ['sounds', 'translator', 'components'], function (sounds, translator, components) {
+define('notifications', ['sounds', 'translator', 'components', 'navigator', 'benchpress'], function (sounds, translator, components, navigator, Benchpress) {
 	var Notifications = {};
 
 	var unreadNotifs = {};
@@ -20,12 +20,19 @@ define('notifications', ['sounds', 'translator', 'components'], function (sounds
 			Notifications.loadNotifications(notifList);
 		});
 
-		notifList.on('click', '[data-nid]', function () {
-			var unread = $(this).hasClass('unread');
+		notifList.on('click', '[data-nid]', function (ev) {
+			var notifEl = $(this);
+			if (scrollToPostIndexIfOnPage(notifEl)) {
+				ev.stopPropagation();
+				ev.preventDefault();
+				notifTrigger.dropdown('toggle');
+			}
+
+			var unread = notifEl.hasClass('unread');
 			if (!unread) {
 				return;
 			}
-			var nid = $(this).attr('data-nid');
+			var nid = notifEl.attr('data-nid');
 			socket.emit('notifications.markRead', nid, function (err) {
 				if (err) {
 					return app.alertError(err.message);
@@ -63,14 +70,14 @@ define('notifications', ['sounds', 'translator', 'components'], function (sounds
 			var payload = {
 				alert_id: 'new_notif',
 				title: '[[notifications:new_notification]]',
-				timeout: 2000,
+				timeout: parseInt(config.notificationAlertTimeout, 10) || 5000,
 			};
 
 			if (notifData.path) {
 				payload.message = notifData.bodyShort;
 				payload.type = 'info';
 				payload.clickfn = function () {
-					if (notifData.path.startsWith('http') && notifData.path.startsWith('https')) {
+					if (notifData.path.startsWith('http') || notifData.path.startsWith('https')) {
 						window.location.href = notifData.path;
 					} else {
 						window.location.href = window.location.protocol + '//' + window.location.host + config.relative_path + notifData.path;
@@ -107,6 +114,18 @@ define('notifications', ['sounds', 'translator', 'components'], function (sounds
 		});
 	};
 
+	function scrollToPostIndexIfOnPage(notifEl) {
+		// Scroll to index if already in topic (gh#5873)
+		var pid = notifEl.attr('data-pid');
+		var path = notifEl.attr('data-path');
+		var postEl = components.get('post', 'pid', pid);
+		if (path.startsWith(config.relative_path + '/post/') && pid && postEl.length && ajaxify.data.template.topic) {
+			navigator.scrollToIndex(postEl.attr('data-index'), true);
+			return true;
+		}
+		return false;
+	}
+
 	Notifications.loadNotifications = function (notifList) {
 		socket.emit('notifications.get', null, function (err, data) {
 			if (err) {
@@ -117,14 +136,14 @@ define('notifications', ['sounds', 'translator', 'components'], function (sounds
 				return parseInt(a.datetime, 10) > parseInt(b.datetime, 10) ? -1 : 1;
 			});
 
-			translator.toggleTimeagoShorthand();
-			for (var i = 0; i < notifs.length; i += 1) {
-				notifs[i].timeago = $.timeago(new Date(parseInt(notifs[i].datetime, 10)));
-			}
-			translator.toggleTimeagoShorthand();
-
-			templates.parse('partials/notifications_list', { notifications: notifs }, function (html) {
-				notifList.translateHtml(html);
+			translator.toggleTimeagoShorthand(function () {
+				for (var i = 0; i < notifs.length; i += 1) {
+					notifs[i].timeago = $.timeago(new Date(parseInt(notifs[i].datetime, 10)));
+				}
+				translator.toggleTimeagoShorthand();
+				Benchpress.parse('partials/notifications_list', { notifications: notifs }, function (html) {
+					notifList.translateHtml(html);
+				});
 			});
 		});
 	};

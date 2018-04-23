@@ -88,15 +88,20 @@ SocketUser.reset.send = function (socket, email, callback) {
 	}
 
 	user.reset.send(email, function (err) {
-		if (err && err.message !== '[[error:invalid-email]]') {
-			return callback(err);
-		}
-		if (err && err.message === '[[error:invalid-email]]') {
-			winston.verbose('[user/reset] Invalid email attempt: ' + email);
-			return setTimeout(callback, 2500);
+		if (err) {
+			switch (err.message) {
+			case '[[error:invalid-email]]':
+				winston.warn('[user/reset] Invalid email attempt: ' + email + ' by IP ' + socket.ip + (socket.uid ? ' (uid: ' + socket.uid + ')' : ''));
+				err = null;
+				break;
+
+			case '[[error:reset-rate-limited]]':
+				err = null;
+				break;
+			}
 		}
 
-		callback();
+		setTimeout(callback.bind(err), 2500);
 	});
 };
 
@@ -128,7 +133,6 @@ SocketUser.reset.commit = function (socket, data, callback) {
 			emailer.send('reset_notify', uid, {
 				username: username,
 				date: parsedDate,
-				site_title: meta.config.title || 'NodeBB',
 				subject: '[[email:reset.notify.subject]]',
 			});
 

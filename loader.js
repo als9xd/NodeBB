@@ -11,8 +11,10 @@ var logrotate = require('logrotate-stream');
 var file = require('./src/file');
 var pkg = require('./package.json');
 
+var pathToConfig = path.resolve(__dirname, process.env.CONFIG || 'config.json');
+
 nconf.argv().env().file({
-	file: path.join(__dirname, 'config.json'),
+	file: pathToConfig,
 });
 
 var	pidFilePath = path.join(__dirname, 'pidfile');
@@ -142,7 +144,7 @@ function getPorts() {
 		process.exit();
 	}
 	var urlObject = url.parse(_url);
-	var port = nconf.get('port') || urlObject.port || 4567;
+	var port = nconf.get('PORT') || nconf.get('port') || urlObject.port || 4567;
 	if (!Array.isArray(port)) {
 		port = [port];
 	}
@@ -152,14 +154,13 @@ function getPorts() {
 Loader.restart = function () {
 	killWorkers();
 
-	var pathToConfig = path.join(__dirname, '/config.json');
 	nconf.remove('file');
 	nconf.use('file', { file: pathToConfig });
 
 	fs.readFile(pathToConfig, { encoding: 'utf-8' }, function (err, configFile) {
 		if (err) {
-			console.log('Error reading config : ' + err.message);
-			process.exit();
+			console.error('Error reading config');
+			throw err;
 		}
 
 		var conf = JSON.parse(configFile);
@@ -168,6 +169,9 @@ Loader.restart = function () {
 		nconf.set('url', conf.url);
 		nconf.stores.env.readOnly = true;
 
+		if (process.env.url !== conf.url) {
+			process.env.url = conf.url;
+		}
 		Loader.start();
 	});
 };
@@ -184,7 +188,9 @@ Loader.stop = function () {
 	killWorkers();
 
 	// Clean up the pidfile
-	fs.unlinkSync(pidFilePath);
+	if (nconf.get('daemon') !== 'false' && nconf.get('daemon') !== false) {
+		fs.unlinkSync(pidFilePath);
+	}
 };
 
 function killWorkers() {
@@ -207,7 +213,7 @@ Loader.notifyWorkers = function (msg, worker_pid) {
 	});
 };
 
-fs.open(path.join(__dirname, 'config.json'), 'r', function (err) {
+fs.open(pathToConfig, 'r', function (err) {
 	if (!err) {
 		if (nconf.get('daemon') !== 'false' && nconf.get('daemon') !== false) {
 			if (file.existsSync(pidFilePath)) {
@@ -235,11 +241,12 @@ fs.open(path.join(__dirname, 'config.json'), 'r', function (err) {
 			Loader.start,
 		], function (err) {
 			if (err) {
-				console.log('[loader] Error during startup: ' + err.message);
+				console.error('[loader] Error during startup');
+				throw err;
 			}
 		});
 	} else {
 		// No config detected, kickstart web installer
-		require('child_process').fork('app');
+		fork('app');
 	}
 });

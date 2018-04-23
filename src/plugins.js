@@ -30,6 +30,7 @@ Plugins.loadedHooks = {};
 Plugins.staticDirs = {};
 Plugins.cssFiles = [];
 Plugins.lessFiles = [];
+Plugins.acpLessFiles = [];
 Plugins.clientScripts = [];
 Plugins.acpScripts = [];
 Plugins.libraryPaths = [];
@@ -62,7 +63,7 @@ Plugins.init = function (nbbApp, nbbMiddleware, callback) {
 
 	Plugins.reload(function (err) {
 		if (err) {
-			winston.error('[plugins] NodeBB encountered a problem while loading plugins', err.message);
+			winston.error('[plugins] NodeBB encountered a problem while loading plugins', err);
 			return callback(err);
 		}
 
@@ -83,6 +84,7 @@ Plugins.reload = function (callback) {
 	Plugins.versionWarning = [];
 	Plugins.cssFiles.length = 0;
 	Plugins.lessFiles.length = 0;
+	Plugins.acpLessFiles.length = 0;
 	Plugins.clientScripts.length = 0;
 	Plugins.acpScripts.length = 0;
 	Plugins.libraryPaths.length = 0;
@@ -95,12 +97,12 @@ Plugins.reload = function (callback) {
 		function (next) {
 			// If some plugins are incompatible, throw the warning here
 			if (Plugins.versionWarning.length && nconf.get('isPrimary') === 'true') {
-				process.stdout.write('\n');
+				console.log('');
 				winston.warn('[plugins/load] The following plugins may not be compatible with your version of NodeBB. This may cause unintended behaviour or crashing. In the event of an unresponsive NodeBB caused by this plugin, run `./nodebb reset -p PLUGINNAME` to disable it.');
 				for (var x = 0, numPlugins = Plugins.versionWarning.length; x < numPlugins; x += 1) {
-					process.stdout.write('  * '.yellow + Plugins.versionWarning[x] + '\n');
+					console.log('  * '.yellow + Plugins.versionWarning[x]);
 				}
-				process.stdout.write('\n');
+				console.log('');
 			}
 
 			Object.keys(Plugins.loadedHooks).forEach(function (hook) {
@@ -117,10 +119,6 @@ Plugins.reload = function (callback) {
 
 Plugins.reloadRoutes = function (callback) {
 	var router = express.Router();
-	// var ensureLoggedIn = require('connect-ensure-login');
-
-	// router.all('(/api/admin|/api/admin/*?)', middleware.isAdmin);
-	// router.all('(/admin|/admin/*?)', ensureLoggedIn.ensureLoggedIn(nconf.get('relative_path') + '/login?local=1'), middleware.applyCSRF, middleware.isAdmin);
 
 	router.hotswapId = 'plugins';
 	router.render = function () {
@@ -130,7 +128,7 @@ Plugins.reloadRoutes = function (callback) {
 	var controllers = require('./controllers');
 	Plugins.fireHook('static:app.load', { app: app, router: router, middleware: middleware, controllers: controllers }, function (err) {
 		if (err) {
-			winston.error('[plugins] Encountered error while executing post-router plugins hooks: ' + err.message);
+			winston.error('[plugins] Encountered error while executing post-router plugins hooks', err);
 			return callback(err);
 		}
 
@@ -140,9 +138,12 @@ Plugins.reloadRoutes = function (callback) {
 	});
 };
 
+// DEPRECATED: remove in v1.8.0
 Plugins.getTemplates = function (callback) {
 	var templates = {};
 	var tplName;
+
+	winston.warn('[deprecated] Plugins.getTemplates is DEPRECATED to be removed in v1.8.0');
 
 	Plugins.data.getActive(function (err, plugins) {
 		if (err) {
@@ -215,9 +216,9 @@ Plugins.list = function (matching, callback) {
 	require('request')(url, {
 		json: true,
 	}, function (err, res, body) {
-		if (err) {
-			winston.error('Error parsing plugins : ' + err.message);
-			return callback(err);
+		if (err || (res && res.statusCode !== 200)) {
+			winston.error('Error loading ' + url, err || body);
+			return Plugins.normalise([], callback);
 		}
 
 		Plugins.normalise(body, callback);
@@ -227,7 +228,7 @@ Plugins.list = function (matching, callback) {
 Plugins.normalise = function (apiReturn, callback) {
 	var pluginMap = {};
 	var dependencies = require(path.join(nconf.get('base_dir'), 'package.json')).dependencies;
-	apiReturn = apiReturn || [];
+	apiReturn = Array.isArray(apiReturn) ? apiReturn : [];
 	for (var i = 0; i < apiReturn.length; i += 1) {
 		apiReturn[i].id = apiReturn[i].name;
 		apiReturn[i].installed = false;
@@ -265,6 +266,7 @@ Plugins.normalise = function (apiReturn, callback) {
 			pluginMap[plugin.id].active = plugin.active;
 			pluginMap[plugin.id].version = plugin.version;
 			pluginMap[plugin.id].settingsRoute = plugin.settingsRoute;
+			pluginMap[plugin.id].license = plugin.license;
 
 			// If package.json defines a version to use, stick to that
 			if (dependencies.hasOwnProperty(plugin.id) && semver.valid(dependencies[plugin.id])) {
@@ -301,39 +303,76 @@ Plugins.normalise = function (apiReturn, callback) {
 	});
 };
 
+Plugins.nodeModulesPath = path.join(__dirname, '../node_modules');
+
 Plugins.showInstalled = function (callback) {
-	var npmPluginPath = path.join(__dirname, '../node_modules');
+	var pluginNamePattern = /^(@.*?\/)?nodebb-(theme|plugin|widget|rewards)-.*$/;
 
 	async.waterfall([
-		async.apply(fs.readdir, npmPluginPath),
-
+		function (next) {
+			fs.readdir(Plugins.nodeModulesPath, next);
+		},
 		function (dirs, next) {
-			dirs = dirs.filter(function (dir) {
-				return dir.startsWith('nodebb-plugin-') ||
-					dir.startsWith('nodebb-widget-') ||
-					dir.startsWith('nodebb-rewards-') ||
-					dir.startsWith('nodebb-theme-');
-			}).map(function (dir) {
-				return path.join(npmPluginPath, dir);
-			});
+			var pluginPaths = [];
 
-			async.filter(dirs, function (dir, callback) {
-				fs.stat(dir, function (err, stats) {
-					if (err) {
-						if (err.code === 'ENOENT') {
-							return callback(null, false);
-						}
-						return callback(err);
-					}
-					callback(null, stats.isDirectory());
-				});
-			}, next);
+			async.each(dirs, function (dirname, next) {
+				var dirPath = path.join(Plugins.nodeModulesPath, dirname);
+
+				async.waterfall([
+					function (cb) {
+						fs.stat(dirPath, function (err, stats) {
+							if (err && err.code !== 'ENOENT') {
+								return cb(err);
+							}
+							if (err || !stats.isDirectory()) {
+								return next();
+							}
+
+							if (pluginNamePattern.test(dirname)) {
+								pluginPaths.push(dirname);
+								return next();
+							}
+
+							if (dirname[0] !== '@') {
+								return next();
+							}
+							fs.readdir(dirPath, cb);
+						});
+					},
+					function (subdirs, cb) {
+						async.each(subdirs, function (subdir, next) {
+							if (!pluginNamePattern.test(subdir)) {
+								return next();
+							}
+
+							var subdirPath = path.join(dirPath, subdir);
+							fs.stat(subdirPath, function (err, stats) {
+								if (err && err.code !== 'ENOENT') {
+									return next(err);
+								}
+
+								if (err || !stats.isDirectory()) {
+									return next();
+								}
+
+								pluginPaths.push(dirname + '/' + subdir);
+								next();
+							});
+						}, cb);
+					},
+				], next);
+			}, function (err) {
+				next(err, pluginPaths);
+			});
 		},
 
-		function (files, next) {
+		function (dirs, next) {
+			dirs = dirs.map(function (dir) {
+				return path.join(Plugins.nodeModulesPath, dir);
+			});
 			var plugins = [];
 
-			async.each(files, function (file, next) {
+			async.each(dirs, function (file, next) {
 				async.waterfall([
 					function (next) {
 						Plugins.loadPluginInfo(file, next);

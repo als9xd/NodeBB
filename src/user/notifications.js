@@ -3,12 +3,12 @@
 
 var async = require('async');
 var winston = require('winston');
-var S = require('string');
 
 var db = require('../database');
 var meta = require('../meta');
 var notifications = require('../notifications');
 var privileges = require('../privileges');
+var utils = require('../utils');
 
 var UserNotifications = module.exports;
 
@@ -96,16 +96,10 @@ function deleteUserNids(nids, uid, callback) {
 	if (!nids.length) {
 		return setImmediate(callback);
 	}
-	async.parallel([
-		function (next) {
-			db.sortedSetRemove('uid:' + uid + ':notifications:read', nids, next);
-		},
-		function (next) {
-			db.sortedSetRemove('uid:' + uid + ':notifications:unread', nids, next);
-		},
-	], function (err) {
-		callback(err);
-	});
+	db.sortedSetRemove([
+		'uid:' + uid + ':notifications:read',
+		'uid:' + uid + ':notifications:unread',
+	], nids, callback);
 }
 
 function getNotifications(uid, start, stop, callback) {
@@ -281,7 +275,7 @@ UserNotifications.sendTopicNotificationToFollowers = function (uid, topicData, p
 
 			var title = topicData.title;
 			if (title) {
-				title = S(title).decodeHTMLEntities().s;
+				title = utils.decodeHTMLEntities(title);
 			}
 
 			notifications.create({
@@ -320,6 +314,7 @@ UserNotifications.sendWelcomeNotification = function (uid, callback) {
 				bodyShort: meta.config.welcomeNotification,
 				path: path,
 				nid: 'welcome_' + uid,
+				from: meta.config.welcomeUid ? meta.config.welcomeUid : null,
 			}, next);
 		},
 		function (notification, next) {

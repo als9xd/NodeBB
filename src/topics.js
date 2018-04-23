@@ -21,6 +21,7 @@ require('./topics/delete')(Topics);
 require('./topics/unread')(Topics);
 require('./topics/recent')(Topics);
 require('./topics/popular')(Topics);
+require('./topics/top')(Topics);
 require('./topics/user')(Topics);
 require('./topics/fork')(Topics);
 require('./topics/posts')(Topics);
@@ -31,6 +32,7 @@ require('./topics/suggested')(Topics);
 require('./topics/tools')(Topics);
 require('./topics/thumb')(Topics);
 require('./topics/bookmarks')(Topics);
+require('./topics/merge')(Topics);
 
 Topics.exists = function (tid, callback) {
 	db.isSortedSetMember('topics:tid', tid, callback);
@@ -50,7 +52,7 @@ Topics.getPageCount = function (tid, uid, callback) {
 			user.getSettings(uid, next);
 		},
 		function (settings, next) {
-			next(null, Math.ceil((parseInt(postCount, 10) - 1) / settings.postsPerPage));
+			next(null, Math.ceil(parseInt(postCount, 10) / settings.postsPerPage));
 		},
 	], callback);
 };
@@ -115,6 +117,9 @@ Topics.getTopicsByTids = function (tids, uid, callback) {
 				users: function (next) {
 					user.getUsersFields(uids, ['uid', 'username', 'fullname', 'userslug', 'reputation', 'postcount', 'picture', 'signature', 'banned', 'status'], next);
 				},
+				userSettings: function (next) {
+					user.getMultipleUserSettings(uids, next);
+				},
 				categories: function (next) {
 					categories.getCategoriesFields(cids, ['cid', 'name', 'slug', 'icon', 'image', 'bgColor', 'color', 'disabled'], next);
 				},
@@ -136,11 +141,11 @@ Topics.getTopicsByTids = function (tids, uid, callback) {
 			}, next);
 		},
 		function (results, next) {
-			if (parseInt(meta.config.hideFullname, 10) === 1) {
-				results.users.forEach(function (user) {
+			results.users.forEach(function (user, index) {
+				if (parseInt(meta.config.hideFullname, 10) === 1 || !results.userSettings[index].showfullname) {
 					user.fullname = undefined;
-				});
-			}
+				}
+			});
 
 			var users = _.zipObject(uids, results.users);
 			var categories = _.zipObject(cids, results.categories);
@@ -161,6 +166,9 @@ Topics.getTopicsByTids = function (tids, uid, callback) {
 					topics[i].bookmark = results.bookmarks[i];
 					topics[i].unreplied = !topics[i].teaser;
 
+					topics[i].upvotes = parseInt(topics[i].upvotes, 10) || 0;
+					topics[i].downvotes = parseInt(topics[i].downvotes, 10) || 0;
+					topics[i].votes = topics[i].upvotes - topics[i].downvotes;
 					topics[i].icons = [];
 				}
 			}
@@ -182,13 +190,15 @@ Topics.getTopicWithPosts = function (topicData, set, uid, start, stop, reverse, 
 		function (next) {
 			async.parallel({
 				posts: async.apply(getMainPostAndReplies, topicData, set, uid, start, stop, reverse),
-				category: async.apply(Topics.getCategoryData, topicData.tid),
+				category: async.apply(categories.getCategoryData, topicData.cid),
+				tagWhitelist: async.apply(categories.getTagWhitelist, [topicData.cid]),
 				threadTools: async.apply(plugins.fireHook, 'filter:topic.thread_tools', { topic: topicData, uid: uid, tools: [] }),
 				isFollowing: async.apply(Topics.isFollowing, [topicData.tid], uid),
 				isIgnoring: async.apply(Topics.isIgnoring, [topicData.tid], uid),
 				bookmark: async.apply(Topics.getUserBookmark, topicData.tid, uid),
 				postSharing: async.apply(social.getActivePostSharing),
 				deleter: async.apply(getDeleter, topicData),
+				merger: async.apply(getMerger, topicData),
 				related: function (next) {
 					async.waterfall([
 						function (next) {
@@ -205,6 +215,7 @@ Topics.getTopicWithPosts = function (topicData, set, uid, start, stop, reverse, 
 		function (results, next) {
 			topicData.posts = results.posts;
 			topicData.category = results.category;
+			topicData.tagWhitelist = results.tagWhitelist[0];
 			topicData.thread_tools = results.threadTools.tools;
 			topicData.isFollowing = results.isFollowing[0];
 			topicData.isNotFollowing = !results.isFollowing[0] && !results.isIgnoring[0];
@@ -213,12 +224,18 @@ Topics.getTopicWithPosts = function (topicData, set, uid, start, stop, reverse, 
 			topicData.postSharing = results.postSharing;
 			topicData.deleter = results.deleter;
 			topicData.deletedTimestampISO = utils.toISOString(topicData.deletedTimestamp);
+			topicData.merger = results.merger;
+			topicData.mergedTimestampISO = utils.toISOString(topicData.mergedTimestamp);
 			topicData.related = results.related || [];
 
 			topicData.unreplied = parseInt(topicData.postcount, 10) === 1;
 			topicData.deleted = parseInt(topicData.deleted, 10) === 1;
 			topicData.locked = parseInt(topicData.locked, 10) === 1;
 			topicData.pinned = parseInt(topicData.pinned, 10) === 1;
+
+			topicData.upvotes = parseInt(topicData.upvotes, 10) || 0;
+			topicData.downvotes = parseInt(topicData.downvotes, 10) || 0;
+			topicData.votes = topicData.upvotes - topicData.downvotes;
 
 			topicData.icons = [];
 
@@ -247,7 +264,7 @@ function getMainPostAndReplies(topic, set, uid, start, stop, reverse, callback) 
 				return callback(null, []);
 			}
 
-			if (topic.mainPid && start === 0) {
+			if (parseInt(topic.mainPid, 10) && start === 0) {
 				pids.unshift(topic.mainPid);
 			}
 			posts.getPostsByPids(pids, uid, next);
@@ -274,6 +291,28 @@ function getDeleter(topicData, callback) {
 		return setImmediate(callback, null, null);
 	}
 	user.getUserFields(topicData.deleterUid, ['username', 'userslug', 'picture'], callback);
+}
+
+function getMerger(topicData, callback) {
+	if (!topicData.mergerUid) {
+		return setImmediate(callback, null, null);
+	}
+	async.waterfall([
+		function (next) {
+			async.parallel({
+				merger: function (next) {
+					user.getUserFields(topicData.mergerUid, ['username', 'userslug', 'picture'], next);
+				},
+				mergedIntoTitle: function (next) {
+					Topics.getTopicField(topicData.mergeIntoTid, 'title', next);
+				},
+			}, next);
+		},
+		function (results, next) {
+			results.merger.mergedIntoTitle = results.mergedIntoTitle;
+			next(null, results.merger);
+		},
+	], callback);
 }
 
 Topics.getMainPost = function (tid, uid, callback) {

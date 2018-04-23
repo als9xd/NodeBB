@@ -13,10 +13,14 @@
 	"disable-email-changes": "Onemogući promjenu emaila",
 	"disable-password-changes": "Onemogući promjenu lozinke",
 	"allow-account-deletion": "Dozvoli brisanje računa korisnicima",
-	"user-info-private": "Postavi korisničke informacije privatne",
+	"user-info-private": "Hide user list and data from guests",
+	"hide-fullname": "Hide fullname from users",
+	"hide-email": "Hide email from users",
 	"themes": "Predlošci",
 	"disable-user-skins": "Onemogući korisnicima odabir predloška",
 	"account-protection": "Zaštita računa",
+	"admin-relogin-duration": "Admin relogin duration (minutes)",
+	"admin-relogin-duration-help": "After a set amount of time accessing the admin section will require re-login, set to 0 to disable",
 	"login-attempts": "Pokušaji prijave po satu",
 	"login-attempts-help": "U slučaju pokušaja prijave na račun user&apos;s u tolikoj količini da prelazi ovaj prag,račun će biti zaključan na pre-konfigurirano vrijeme",
 	"lockout-duration": "Broj minuta u slučaju zaključavanja računa",
@@ -58,5 +62,6 @@
 	"email-chat-notifs": "Pošalji email ukoliko stigne nova poruka dok nisam na mreži",
 	"email-post-notif": "Pošalji email pri odgovoru u teme na koje pratim",
 	"follow-created-topics": "Prati teme koje kreiram",
-	"follow-replied-topics": "Prati teme na koje odgovorim"
+	"follow-replied-topics": "Prati teme na koje odgovorim",
+	"default-notification-settings": "Default notification settings"
 }

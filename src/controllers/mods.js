@@ -6,6 +6,8 @@ var user = require('../user');
 var categories = require('../categories');
 var flags = require('../flags');
 var analytics = require('../analytics');
+var plugins = require('../plugins');
+var adminPostQueueController = require('./admin/postqueue');
 
 var modsController = module.exports;
 modsController.flags = {};
@@ -13,11 +15,13 @@ modsController.flags = {};
 modsController.flags.list = function (req, res, next) {
 	var filters;
 	var hasFilter;
+	var validFilters = ['assignee', 'state', 'reporterId', 'type', 'targetUid', 'cid', 'quick'];
 	async.waterfall([
 		function (next) {
 			async.parallel({
 				isAdminOrGlobalMod: async.apply(user.isAdminOrGlobalMod, req.uid),
 				moderatedCids: async.apply(user.getModeratedCids, req.uid),
+				validFilters: async.apply(plugins.fireHook, 'filter:flags.validateFilters', { filters: validFilters }),
 			}, next);
 		},
 		function (results, next) {
@@ -29,10 +33,12 @@ modsController.flags.list = function (req, res, next) {
 				res.locals.cids = results.moderatedCids;
 			}
 
+			validFilters = results.validFilters.filters;
+
 			// Parse query string params for filters
 			hasFilter = false;
-			var valid = ['assignee', 'state', 'reporterId', 'type', 'targetUid', 'cid', 'quick'];
-			filters = valid.reduce(function (memo, cur) {
+
+			filters = validFilters.reduce(function (memo, cur) {
 				if (req.query.hasOwnProperty(cur)) {
 					memo[cur] = req.query[cur];
 				}
@@ -110,11 +116,17 @@ modsController.flags.detail = function (req, res, next) {
 			return next(new Error('[[error:no-privileges]]'));
 		}
 
+		if (results.flagData.type === 'user') {
+			results.flagData.type_path = 'uid';
+		} else if (results.flagData.type === 'post') {
+			results.flagData.type_path = 'post';
+		}
+
 		res.render('flags/detail', Object.assign(results.flagData, {
 			assignees: results.assignees,
 			type_bool: ['post', 'user', 'empty'].reduce(function (memo, cur) {
 				if (cur !== 'empty') {
-					memo[cur] = results.flagData.type === cur && !!Object.keys(results.flagData.target).length;
+					memo[cur] = results.flagData.type === cur && (!results.flagData.target || !!Object.keys(results.flagData.target).length);
 				} else {
 					memo[cur] = !Object.keys(results.flagData.target).length;
 				}
@@ -125,3 +137,18 @@ modsController.flags.detail = function (req, res, next) {
 		}));
 	});
 };
+
+modsController.postQueue = function (req, res, next) {
+	async.waterfall([
+		function (next) {
+			user.isPrivileged(req.uid, next);
+		},
+		function (isPrivileged, next) {
+			if (!isPrivileged) {
+				return next();
+			}
+			adminPostQueueController.get(req, res, next);
+		},
+	], next);
+};
+

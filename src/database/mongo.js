@@ -8,48 +8,60 @@ var nconf = require('nconf');
 var session = require('express-session');
 var _ = require('lodash');
 var semver = require('semver');
+var prompt = require('prompt');
 var db;
 
 var mongoModule = module.exports;
 
+function isUriNotSpecified() {
+	return !prompt.history('mongo:uri').value;
+}
+
 mongoModule.questions = [
+	{
+		name: 'mongo:uri',
+		description: 'MongoDB connection URI: (leave blank if you wish to specify host, port, username/password and database individually)\nFormat: mongodb://[username:password@]host1[:port1][,host2[:port2],...[,hostN[:portN]]][/[database][?options]]',
+		default: nconf.get('mongo:uri') || '',
+		hideOnWebInstall: true,
+	},
 	{
 		name: 'mongo:host',
 		description: 'Host IP or address of your MongoDB instance',
 		default: nconf.get('mongo:host') || '127.0.0.1',
+		ask: isUriNotSpecified,
 	},
 	{
 		name: 'mongo:port',
 		description: 'Host port of your MongoDB instance',
 		default: nconf.get('mongo:port') || 27017,
+		ask: isUriNotSpecified,
 	},
 	{
 		name: 'mongo:username',
 		description: 'MongoDB username',
 		default: nconf.get('mongo:username') || '',
+		ask: isUriNotSpecified,
 	},
 	{
 		name: 'mongo:password',
 		description: 'Password of your MongoDB database',
-		hidden: true,
 		default: nconf.get('mongo:password') || '',
+		hidden: true,
+		ask: isUriNotSpecified,
 		before: function (value) { value = value || nconf.get('mongo:password') || ''; return value; },
 	},
 	{
 		name: 'mongo:database',
 		description: 'MongoDB database name',
 		default: nconf.get('mongo:database') || 'nodebb',
+		ask: isUriNotSpecified,
 	},
 ];
 
 mongoModule.helpers = mongoModule.helpers || {};
 mongoModule.helpers.mongo = require('./mongo/helpers');
 
-mongoModule.init = function (callback) {
-	callback = callback || function () { };
-
-	var mongoClient = require('mongodb').MongoClient;
-
+function getConnectionString() {
 	var usernamePassword = '';
 	if (nconf.get('mongo:username') && nconf.get('mongo:password')) {
 		usernamePassword = nconf.get('mongo:username') + ':' + encodeURIComponent(nconf.get('mongo:password')) + '@';
@@ -76,7 +88,15 @@ mongoModule.init = function (callback) {
 		servers.push(hosts[i] + ':' + ports[i]);
 	}
 
-	var connString = nconf.get('mongo:uri') || 'mongodb://' + usernamePassword + servers.join() + '/' + nconf.get('mongo:database');
+	return nconf.get('mongo:uri') || 'mongodb://' + usernamePassword + servers.join() + '/' + nconf.get('mongo:database');
+}
+
+mongoModule.init = function (callback) {
+	callback = callback || function () { };
+
+	var mongoClient = require('mongodb').MongoClient;
+
+	var connString = getConnectionString();
 
 	var connOptions = {
 		poolSize: 10,
@@ -89,7 +109,7 @@ mongoModule.init = function (callback) {
 
 	mongoClient.connect(connString, connOptions, function (err, _db) {
 		if (err) {
-			winston.error('NodeBB could not connect to your Mongo database. Mongo returned the following error: ' + err.message);
+			winston.error('NodeBB could not connect to your Mongo database. Mongo returned the following error', err);
 			return callback(err);
 		}
 
@@ -149,7 +169,7 @@ mongoModule.createIndices = function (callback) {
 		async.apply(createIndex, 'objects', { expireAt: 1 }, { expireAfterSeconds: 0, background: true }),
 	], function (err) {
 		if (err) {
-			winston.error('Error creating index ' + err.message);
+			winston.error('Error creating index', err);
 			return callback(err);
 		}
 		winston.info('[database] Checking database indices done!');
@@ -244,5 +264,12 @@ function getCollectionStats(db, callback) {
 
 mongoModule.close = function (callback) {
 	callback = callback || function () {};
-	db.close(callback);
+	db.close(function (err) {
+		callback(err);
+	});
+};
+
+mongoModule.socketAdapter = function () {
+	var mongoAdapter = require('socket.io-adapter-mongo');
+	return mongoAdapter(getConnectionString());
 };

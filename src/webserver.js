@@ -3,6 +3,7 @@
 
 var fs = require('fs');
 var path = require('path');
+var os = require('os');
 var nconf = require('nconf');
 var express = require('express');
 var app = express();
@@ -16,6 +17,8 @@ var cookieParser = require('cookie-parser');
 var session = require('express-session');
 var useragent = require('express-useragent');
 var favicon = require('serve-favicon');
+var detector = require('spider-detector');
+var helmet = require('helmet');
 
 var db = require('./database');
 var file = require('./file');
@@ -27,7 +30,7 @@ var plugins = require('./plugins');
 var flags = require('./flags');
 var routes = require('./routes');
 var auth = require('./routes/authentication');
-var templates = require('templates.js');
+var Benchpress = require('benchpressjs');
 
 var helpers = require('../public/src/modules/helpers');
 
@@ -36,21 +39,43 @@ if (nconf.get('ssl')) {
 		key: fs.readFileSync(nconf.get('ssl').key),
 		cert: fs.readFileSync(nconf.get('ssl').cert),
 	}, app);
-} else {
-	server = require('http').createServer(app);
 }
+
+let http_port = 80;
+require('http').createServer(app).listen(http_port,()=>{
+	winston.info('NodeBB is now listening on: 0.0.0.0:' + http_port);
+});
 
 module.exports.server = server;
 
 server.on('error', function (err) {
-	winston.error(err);
 	if (err.code === 'EADDRINUSE') {
-		winston.error('NodeBB address in use, exiting...');
-		process.exit(1);
+		winston.error('NodeBB address in use, exiting...', err);
 	} else {
-		throw err;
+		winston.error(err);
 	}
+
+	throw err;
 });
+
+// see https://github.com/isaacs/server-destroy/blob/master/index.js
+var connections = {};
+server.on('connection', function (conn) {
+	var key = conn.remoteAddress + ':' + conn.remotePort;
+	connections[key] = conn;
+	conn.on('close', function () {
+		delete connections[key];
+	});
+});
+
+module.exports.destroy = function (callback) {
+	server.close(callback);
+	for (var key in connections) {
+		if (connections.hasOwnProperty(key)) {
+			connections[key].destroy();
+		}
+	}
+};
 
 module.exports.listen = function (callback) {
 	callback = callback || function () { };
@@ -72,6 +97,7 @@ module.exports.listen = function (callback) {
 
 			require('./socket.io').server.emit('event:nodebb.ready', {
 				'cache-buster': meta.config['cache-buster'],
+				hostname: os.hostname(),
 			});
 
 			plugins.fireHook('action:nodebb.ready');
@@ -105,7 +131,6 @@ function initializeNodeBB(callback) {
 		function (next) {
 			async.series([
 				meta.sounds.addUploads,
-				languages.init,
 				meta.blacklist.load,
 				flags.init,
 			], next);
@@ -117,13 +142,27 @@ function initializeNodeBB(callback) {
 
 function setupExpressApp(app, callback) {
 	var middleware = require('./middleware');
+	var pingController = require('./controllers/ping');
 
 	var relativePath = nconf.get('relative_path');
+	var viewsDir = nconf.get('views_dir');
 
-	app.engine('tpl', templates.__express);
+	app.engine('tpl', function (filepath, data, next) {
+		filepath = filepath.replace(/\.tpl$/, '.js');
+
+		middleware.templatesOnDemand({
+			filePath: filepath,
+		}, null, function (err) {
+			if (err) {
+				return next(err);
+			}
+
+			Benchpress.__express(filepath, data, next);
+		});
+	});
 	app.set('view engine', 'tpl');
-	app.set('views', nconf.get('views_dir'));
-	app.set('json spaces', process.env.NODE_ENV === 'development' ? 4 : 0);
+	app.set('views', viewsDir);
+	app.set('json spaces', global.env === 'development' ? 4 : 0);
 	app.use(flash());
 
 	app.enable('view cache');
@@ -135,9 +174,16 @@ function setupExpressApp(app, callback) {
 
 	app.use(compression());
 
-	app.get(relativePath + '/ping', ping);
-	app.get(relativePath + '/sping', ping);
-
+        app.all('*',function(req,res,next){
+                if(req.secure){
+                        return next();
+                }
+                res.redirect('https://'+req.hostname+req.url);
+        });
+	
+	app.get(relativePath + '/ping', pingController.ping);
+	app.get(relativePath + '/sping', pingController.ping);
+	
 	setupFavicon(app);
 
 	app.use(relativePath + '/apple-touch-icon', middleware.routeTouchIcon);
@@ -146,6 +192,7 @@ function setupExpressApp(app, callback) {
 	app.use(bodyParser.json());
 	app.use(cookieParser());
 	app.use(useragent.express());
+	app.use(detector.middleware());
 
 	app.use(session({
 		store: db.sessionStore,
@@ -156,6 +203,8 @@ function setupExpressApp(app, callback) {
 		saveUninitialized: true,
 	}));
 
+	app.use(helmet());
+	app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));
 	app.use(middleware.addHeaders);
 	app.use(middleware.processRender);
 	auth.initialize(app, middleware);
@@ -165,10 +214,6 @@ function setupExpressApp(app, callback) {
 	toobusy.interval(parseInt(meta.config.eventLoopInterval, 10) || 500);
 
 	setupAutoLocale(app, callback);
-}
-
-function ping(req, res) {
-	res.status(200).send(req.path === '/sping' ? 'healthy' : '200');
 }
 
 function setupFavicon(app) {
@@ -233,8 +278,8 @@ function setupAutoLocale(app, callback) {
 
 function listen(callback) {
 	callback = callback || function () { };
-	var port = parseInt(nconf.get('port'), 10);
-	var isSocket = isNaN(port);
+	var port = nconf.get('port');
+	var isSocket = isNaN(port) && !Array.isArray(port);
 	var socketPath = isSocket ? nconf.get('port') : '';
 
 	if (Array.isArray(port)) {
@@ -251,7 +296,7 @@ function listen(callback) {
 			process.exit();
 		}
 	}
-
+	port = parseInt(port, 10);
 	if ((port !== 80 && port !== 443) || nconf.get('trust_proxy') === true) {
 		winston.info('Enabling \'trust proxy\'');
 		app.enable('trust proxy');
@@ -282,13 +327,12 @@ function listen(callback) {
 	if (isSocket) {
 		oldUmask = process.umask('0000');
 		module.exports.testSocket(socketPath, function (err) {
-			if (!err) {
-				server.listen.apply(server, args);
-			} else {
-				winston.error('[startup] NodeBB was unable to secure domain socket access (' + socketPath + ')');
-				winston.error('[startup] ' + err.message);
-				process.exit();
+			if (err) {
+				winston.error('[startup] NodeBB was unable to secure domain socket access (' + socketPath + ')', err);
+				throw err;
 			}
+
+			server.listen.apply(server, args);
 		});
 	} else {
 		server.listen.apply(server, args);

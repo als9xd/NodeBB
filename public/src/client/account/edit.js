@@ -1,7 +1,7 @@
 'use strict';
 
 
-define('forum/account/edit', ['forum/account/header', 'translator', 'components', 'pictureCropper'], function (header, translator, components, pictureCropper) {
+define('forum/account/edit', ['forum/account/header', 'translator', 'components', 'pictureCropper', 'benchpress'], function (header, translator, components, pictureCropper, Benchpress) {
 	var AccountEdit = {};
 
 	AccountEdit.init = function () {
@@ -84,7 +84,7 @@ define('forum/account/edit', ['forum/account/header', 'translator', 'components'
 					return memo || cur.type === 'uploaded';
 				}, false);
 
-				templates.parse('partials/modals/change_picture_modal', {
+				Benchpress.parse('partials/modals/change_picture_modal', {
 					pictures: pictures,
 					uploaded: uploaded,
 					icon: { text: ajaxify.data['icon:text'], bgColor: ajaxify.data['icon:bgColor'] },
@@ -158,22 +158,45 @@ define('forum/account/edit', ['forum/account/header', 'translator', 'components'
 	function handleAccountDelete() {
 		$('#deleteAccountBtn').on('click', function () {
 			translator.translate('[[user:delete_account_confirm]]', function (translated) {
-				var modal = bootbox.confirm(translated + '<p><input type="text" class="form-control" id="confirm-username" /></p>', function (confirm) {
+				var modal = bootbox.confirm(translated + '<p><input type="password" class="form-control" id="confirm-password" /></p>', function (confirm) {
 					if (!confirm) {
 						return;
 					}
 
-					if ($('#confirm-username').val() !== app.user.username) {
-						app.alertError('[[error:invalid-username]]');
-						return false;
-					}
-					socket.emit('user.deleteAccount', {}, function (err) {
-						if (err) {
-							return app.alertError(err.message);
+					var confirmBtn = modal.find('.btn-primary');
+					confirmBtn.html('<i class="fa fa-spinner fa-spin"></i>');
+					confirmBtn.prop('disabled', true);
+
+					socket.emit('user.checkPassword', {
+						uid: parseInt(ajaxify.data.uid, 10),
+						password: $('#confirm-password').val(),
+					}, function (err, ok) {
+						function restoreButton() {
+							translator.translate('[[modules:bootbox.confirm]]', function (confirmText) {
+								confirmBtn.text(confirmText);
+								confirmBtn.prop('disabled', false);
+							});
 						}
 
-						window.location.href = config.relative_path + '/';
+						if (err) {
+							restoreButton();
+							return app.alertError(err.message);
+						} else if (!ok) {
+							restoreButton();
+							return app.alertError('[[error:invalid-password]]');
+						}
+
+						confirmBtn.html('<i class="fa fa-check"></i>');
+						socket.emit('user.deleteAccount', {}, function (err) {
+							if (err) {
+								return app.alertError(err.message);
+							}
+
+							window.location.href = config.relative_path + '/';
+						});
 					});
+
+					return false;
 				});
 
 				modal.on('shown.bs.modal', function () {
@@ -186,7 +209,7 @@ define('forum/account/edit', ['forum/account/header', 'translator', 'components'
 
 	function handleImageUpload(modal) {
 		function onUploadComplete(urlOnServer) {
-			urlOnServer = config.relative_path + urlOnServer + '?' + Date.now();
+			urlOnServer = (!urlOnServer.startsWith('http') ? config.relative_path : '') + urlOnServer + '?' + Date.now();
 
 			updateHeader(urlOnServer);
 
@@ -229,7 +252,7 @@ define('forum/account/edit', ['forum/account/header', 'translator', 'components'
 
 		modal.find('[data-action="upload-url"]').on('click', function () {
 			modal.modal('hide');
-			templates.parse('partials/modals/upload_picture_from_url_modal', {}, function (html) {
+			Benchpress.parse('partials/modals/upload_picture_from_url_modal', {}, function (html) {
 				translator.translate(html, function (html) {
 					var uploadModal = $(html);
 					uploadModal.modal('show');
@@ -239,25 +262,18 @@ define('forum/account/edit', ['forum/account/header', 'translator', 'components'
 						if (!url) {
 							return false;
 						}
-						socket.emit('user.uploadProfileImageFromUrl', {
-							uid: ajaxify.data.uid,
+
+						uploadModal.modal('hide');
+
+						pictureCropper.handleImageCrop({
 							url: url,
-						}, function (err, url) {
-							if (err) {
-								return app.alertError(err);
-							}
+							socketMethod: 'user.uploadCroppedPicture',
+							aspectRatio: 1,
+							allowSkippingCrop: false,
+							paramName: 'uid',
+							paramValue: ajaxify.data.theirid,
+						}, onUploadComplete);
 
-							uploadModal.modal('hide');
-
-							pictureCropper.handleImageCrop({
-								url: url,
-								socketMethod: 'user.uploadCroppedPicture',
-								aspectRatio: '1 / 1',
-								allowSkippingCrop: false,
-								paramName: 'uid',
-								paramValue: ajaxify.data.theirid,
-							}, onUploadComplete);
-						});
 						return false;
 					});
 				});

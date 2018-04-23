@@ -14,19 +14,18 @@ module.exports = function (User) {
 		var uid = data.uid || 0;
 		var paginate = data.hasOwnProperty('paginate') ? data.paginate : true;
 
-		if (searchBy === 'ip') {
-			return searchByIP(query, uid, callback);
-		}
-
 		var startTime = process.hrtime();
 
 		var searchResult = {};
 		async.waterfall([
 			function (next) {
-				if (data.findUids) {
-					data.findUids(query, searchBy, next);
+				if (searchBy === 'ip') {
+					searchByIP(query, next);
+				} else if (searchBy === 'uid') {
+					next(null, [query]);
 				} else {
-					findUids(query, searchBy, next);
+					var searchMethod = data.findUids || findUids;
+					searchMethod(query, searchBy, data.hardCap, next);
 				}
 			},
 			function (uids, next) {
@@ -57,7 +56,7 @@ module.exports = function (User) {
 		], callback);
 	};
 
-	function findUids(query, searchBy, callback) {
+	function findUids(query, searchBy, hardCap, callback) {
 		if (!query) {
 			return callback(null, []);
 		}
@@ -66,7 +65,7 @@ module.exports = function (User) {
 		var max = query.substr(0, query.length - 1) + String.fromCharCode(query.charCodeAt(query.length - 1) + 1);
 
 		var resultsPerPage = parseInt(meta.config.userSearchResultsPerPage, 10) || 20;
-		var hardCap = resultsPerPage * 10;
+		hardCap = hardCap || resultsPerPage * 10;
 
 		async.waterfall([
 			function (next) {
@@ -82,9 +81,15 @@ module.exports = function (User) {
 	}
 
 	function filterAndSortUids(uids, data, callback) {
-		var sortBy = data.sortBy || 'joindate';
+		uids = uids.filter(function (uid) {
+			return parseInt(uid, 10);
+		});
 
-		var fields = ['uid', sortBy];
+		var fields = [];
+
+		if (data.sortBy) {
+			fields.push(data.sortBy);
+		}
 		if (data.onlineOnly) {
 			fields = fields.concat(['status', 'lastonline']);
 		}
@@ -94,6 +99,12 @@ module.exports = function (User) {
 		if (data.flaggedOnly) {
 			fields.push('flags');
 		}
+
+		if (!fields.length) {
+			return callback(null, uids);
+		}
+
+		fields = ['uid'].concat(fields);
 
 		async.waterfall([
 			function (next) {
@@ -118,7 +129,9 @@ module.exports = function (User) {
 					});
 				}
 
-				sortUsers(userData, sortBy);
+				if (data.sortBy) {
+					sortUsers(userData, data.sortBy);
+				}
 
 				uids = userData.map(function (user) {
 					return user && user.uid;
@@ -146,20 +159,7 @@ module.exports = function (User) {
 		}
 	}
 
-	function searchByIP(ip, uid, callback) {
-		var start = process.hrtime();
-		async.waterfall([
-			function (next) {
-				db.getSortedSetRevRange('ip:' + ip + ':uid', 0, -1, next);
-			},
-			function (uids, next) {
-				User.getUsers(uids, uid, next);
-			},
-			function (users, next) {
-				var diff = process.hrtime(start);
-				var timing = ((diff[0] * 1e3) + (diff[1] / 1e6)).toFixed(1);
-				next(null, { timing: timing, users: users });
-			},
-		], callback);
+	function searchByIP(ip, callback) {
+		db.getSortedSetRevRange('ip:' + ip + ':uid', 0, -1, callback);
 	}
 };

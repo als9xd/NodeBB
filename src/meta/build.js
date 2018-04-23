@@ -83,6 +83,8 @@ var aliases = {
 	sounds: ['sound'],
 };
 
+exports.aliases = aliases;
+
 aliases = Object.keys(aliases).reduce(function (prev, key) {
 	var arr = aliases[key];
 	arr.forEach(function (alias) {
@@ -97,13 +99,15 @@ function beforeBuild(targets, callback) {
 	var plugins = require('../plugins');
 	meta = require('../meta');
 
+	process.stdout.write('  started'.green + '\n'.reset);
+
 	async.series([
 		db.init,
 		meta.themes.setupPaths,
 		async.apply(plugins.prepareForBuild, targets),
 	], function (err) {
 		if (err) {
-			winston.error('[build] Encountered error preparing for build: ' + err.message);
+			winston.error('[build] Encountered error preparing for build', err);
 			return callback(err);
 		}
 
@@ -139,6 +143,11 @@ function build(targets, callback) {
 			target = target.toLowerCase().replace(/-/g, '');
 			if (!aliases[target]) {
 				winston.warn('[build] Unknown target: ' + target);
+				if (target.indexOf(',') !== -1) {
+					winston.warn('[build] Are you specifying multiple targets? Separate them with spaces:');
+					winston.warn('[build]   e.g. `./nodebb build adminjs tpl`');
+				}
+
 				return false;
 			}
 
@@ -203,7 +212,7 @@ function build(targets, callback) {
 		},
 	], function (err) {
 		if (err) {
-			winston.error('[build] Encountered error during build step: ' + err.message);
+			winston.error('[build] Encountered error during build step', err);
 			return callback(err);
 		}
 

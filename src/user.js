@@ -88,11 +88,6 @@ User.getUsersWithFields = function (uids, fields, uid, callback) {
 						user.banned = parseInt(user.banned, 10) === 1;
 					}
 
-					if (user.hasOwnProperty('banned:expire')) {
-						user.banned_until = parseInt(user['banned:expire'], 10) || 0;
-						user.banned_until_readable = user.banned_until ? new Date(user.banned_until).toString() : 'Not Banned';
-					}
-
 					if (user.hasOwnProperty(['email:confirmed'])) {
 						user['email:confirmed'] = parseInt(user['email:confirmed'], 10) === 1;
 					}
@@ -107,13 +102,17 @@ User.getUsersWithFields = function (uids, fields, uid, callback) {
 };
 
 User.getUsers = function (uids, uid, callback) {
-	var fields = ['uid', 'username', 'userslug', 'picture', 'status', 'flags',
-		'banned', 'banned:expire', 'joindate', 'postcount', 'reputation', 'email:confirmed', 'lastonline'];
-
-	User.getUsersWithFields(uids, fields, uid, callback);
+	User.getUsersWithFields(uids, [
+		'uid', 'username', 'userslug', 'picture', 'status',
+		'postcount', 'reputation', 'email:confirmed', 'lastonline',
+		'flags', 'banned', 'banned:expire', 'joindate',
+	], uid, callback);
 };
 
 User.getStatus = function (userData) {
+	if (parseInt(userData.uid, 10) <= 0) {
+		return 'offline';
+	}
 	var isOnline = (Date.now() - parseInt(userData.lastonline, 10)) < 300000;
 	return isOnline ? (userData.status || 'online') : 'offline';
 };
@@ -212,13 +211,17 @@ User.isGlobalModerator = function (uid, callback) {
 	privileges.users.isGlobalModerator(uid, callback);
 };
 
+User.getPrivileges = function (uid, callback) {
+	async.parallel({
+		isAdmin: async.apply(User.isAdministrator, uid),
+		isGlobalModerator: async.apply(User.isGlobalModerator, uid),
+		isModeratorOfAnyCategory: async.apply(User.isModeratorOfAnyCategory, uid),
+	}, callback);
+};
+
 User.isPrivileged = function (uid, callback) {
-	async.parallel([
-		async.apply(User.isAdministrator, uid),
-		async.apply(User.isGlobalModerator, uid),
-		async.apply(User.isModeratorOfAnyCategory, uid),
-	], function (err, results) {
-		callback(err, results ? results.some(Boolean) : false);
+	User.getPrivileges(uid, function (err, results) {
+		callback(err, results ? (results.isAdmin || results.isGlobalModerator || results.isModeratorOfAnyCategory) : false);
 	});
 };
 
@@ -237,6 +240,10 @@ User.isAdminOrSelf = function (callerUid, uid, callback) {
 
 User.isAdminOrGlobalModOrSelf = function (callerUid, uid, callback) {
 	isSelfOrMethod(callerUid, uid, User.isAdminOrGlobalMod, callback);
+};
+
+User.isPrivilegedOrSelf = function (callerUid, uid, callback) {
+	isSelfOrMethod(callerUid, uid, User.isPrivileged, callback);
 };
 
 function isSelfOrMethod(callerUid, uid, method, callback) {

@@ -1,7 +1,7 @@
 'use strict';
 
 
-define('admin/appearance/themes', ['translator'], function (translator) {
+define('admin/appearance/themes', ['translator', 'benchpress'], function (translator, Benchpress) {
 	var Themes = {};
 
 	Themes.init = function () {
@@ -33,7 +33,9 @@ define('admin/appearance/themes', ['translator'], function (translator) {
 						message: '[[admin/appearance/themes:restart-to-activate]]',
 						timeout: 5000,
 						clickfn: function () {
-							socket.emit('admin.restart');
+							require(['admin/modules/instance'], function (instance) {
+								instance.rebuildAndRestart();
+							});
 						},
 					});
 				});
@@ -73,7 +75,7 @@ define('admin/appearance/themes', ['translator'], function (translator) {
 			if (!themes.length) {
 				instListEl.append($('<li/ >').addClass('no-themes').translateHtml('[[admin/appearance/themes:no-themes]]'));
 			} else {
-				templates.parse('admin/partials/theme_list', {
+				Benchpress.parse('admin/partials/theme_list', {
 					themes: themes,
 				}, function (html) {
 					translator.translate(html, function (html) {
@@ -94,16 +96,16 @@ define('admin/appearance/themes', ['translator'], function (translator) {
 			$('[data-theme]')
 				.removeClass('selected')
 				.find('[data-action="use"]')
-					.html(select)
-					.removeClass('btn-success')
-					.addClass('btn-primary');
+				.html(select)
+				.removeClass('btn-success')
+				.addClass('btn-primary');
 
 			$('[data-theme="' + themeId + '"]')
 				.addClass('selected')
 				.find('[data-action="use"]')
-					.html(current)
-					.removeClass('btn-primary')
-					.addClass('btn-success');
+				.html(current)
+				.removeClass('btn-primary')
+				.addClass('btn-success');
 		});
 	}
 

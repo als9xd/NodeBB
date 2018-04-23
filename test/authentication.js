@@ -55,6 +55,7 @@ describe('authentication', function () {
 					email: email,
 					username: username,
 					password: password,
+					'password-confirm': password,
 				},
 				json: true,
 				jar: jar,
@@ -77,6 +78,63 @@ describe('authentication', function () {
 		});
 	});
 
+	it('should fail to create user if username is too short', function (done) {
+		helpers.registerUser({
+			username: 'a',
+			password: '123456',
+			'password-confirm': '123456',
+			email: 'should@error1.com',
+		}, function (err, jar, response, body) {
+			assert.ifError(err);
+			assert.equal(response.statusCode, 400);
+			assert.equal(body, '[[error:username-too-short]]');
+			done();
+		});
+	});
+
+	it('should fail to create user if userslug is too short', function (done) {
+		helpers.registerUser({
+			username: '----a-----',
+			password: '123456',
+			'password-confirm': '123456',
+			email: 'should@error2.com',
+		}, function (err, jar, response, body) {
+			assert.ifError(err);
+			assert.equal(response.statusCode, 400);
+			assert.equal(body, '[[error:username-too-short]]');
+			done();
+		});
+	});
+
+	it('should fail to create user if userslug is too short', function (done) {
+		helpers.registerUser({
+			username: '     a',
+			password: '123456',
+			'password-confirm': '123456',
+			email: 'should@error3.com',
+		}, function (err, jar, response, body) {
+			assert.ifError(err);
+			assert.equal(response.statusCode, 400);
+			assert.equal(body, '[[error:username-too-short]]');
+			done();
+		});
+	});
+
+	it('should fail to create user if userslug is too short', function (done) {
+		helpers.registerUser({
+			username: 'a      ',
+			password: '123456',
+			'password-confirm': '123456',
+			email: 'should@error4.com',
+		}, function (err, jar, response, body) {
+			assert.ifError(err);
+			assert.equal(response.statusCode, 400);
+			assert.equal(body, '[[error:username-too-short]]');
+			done();
+		});
+	});
+
+
 	it('should register and login a user', function (done) {
 		request({
 			url: nconf.get('url') + '/api/config',
@@ -90,6 +148,7 @@ describe('authentication', function () {
 					email: 'admin@nodebb.org',
 					username: 'admin',
 					password: 'adminpwd',
+					'password-confirm': 'adminpwd',
 					userLang: 'it',
 				},
 				json: true,
@@ -127,8 +186,9 @@ describe('authentication', function () {
 				url: nconf.get('url') + '/api/me',
 				json: true,
 				jar: jar,
-			}, function (err, response, body) {
+			}, function (err, res, body) {
 				assert.ifError(err);
+				assert.equal(res.statusCode, 401);
 				assert.equal(body, 'not-authorized');
 				done();
 			});
@@ -171,6 +231,36 @@ describe('authentication', function () {
 					assert(!count);
 					done();
 				});
+			});
+		});
+	});
+
+	it('should fail to login if ip address if invalid', function (done) {
+		var jar = request.jar();
+		request({
+			url: nconf.get('url') + '/api/config',
+			json: true,
+			jar: jar,
+		}, function (err, response, body) {
+			if (err) {
+				return done(err);
+			}
+
+			request.post(nconf.get('url') + '/login', {
+				form: {
+					username: 'regular',
+					password: 'regularpwd',
+				},
+				json: true,
+				jar: jar,
+				headers: {
+					'x-csrf-token': body.csrf_token,
+					'x-forwarded-for': '<script>alert("xss")</script>',
+				},
+			}, function (err, response, body) {
+				assert.ifError(err);
+				assert.equal(response.statusCode, 500);
+				done();
 			});
 		});
 	});

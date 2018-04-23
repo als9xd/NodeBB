@@ -4,7 +4,7 @@
 var async = require('async');
 var _ = require('lodash');
 var validator = require('validator');
-var S = require('string');
+
 var db = require('../database');
 var utils = require('../utils');
 var plugins = require('../plugins');
@@ -63,6 +63,9 @@ module.exports = function (Topics) {
 							'cid:' + topicData.cid + ':tids',
 							'cid:' + topicData.cid + ':uid:' + topicData.uid + ':tids',
 						], timestamp, topicData.tid, next);
+					},
+					function (next) {
+						db.sortedSetAdd('cid:' + topicData.cid + ':tids:votes', 0, topicData.tid, next);
 					},
 					function (next) {
 						categories.updateRecentTid(topicData.cid, topicData.tid, next);
@@ -206,18 +209,17 @@ module.exports = function (Topics) {
 		var uid = data.uid;
 		var content = data.content;
 		var postData;
-		var cid;
 
 		async.waterfall([
 			function (next) {
 				Topics.getTopicField(tid, 'cid', next);
 			},
-			function (_cid, next) {
-				cid = _cid;
+			function (cid, next) {
+				data.cid = cid;
 				async.parallel({
 					topicData: async.apply(Topics.getTopicData, tid),
 					canReply: async.apply(privileges.topics.can, 'topics:reply', tid, uid),
-					isAdminOrMod: async.apply(privileges.categories.isAdminOrMod, cid, uid),
+					isAdminOrMod: async.apply(privileges.categories.isAdminOrMod, data.cid, uid),
 				}, next);
 			},
 			function (results, next) {
@@ -240,7 +242,7 @@ module.exports = function (Topics) {
 				guestHandleValid(data, next);
 			},
 			function (next) {
-				user.isReadyToPost(uid, cid, next);
+				user.isReadyToPost(uid, data.cid, next);
 			},
 			function (next) {
 				plugins.fireHook('filter:topic.reply', data, next);
@@ -281,7 +283,7 @@ module.exports = function (Topics) {
 				}
 
 				Topics.notifyFollowers(postData, uid);
-				analytics.increment(['posts', 'posts:byCid:' + cid]);
+				analytics.increment(['posts', 'posts:byCid:' + data.cid]);
 				plugins.fireHook('action:topic.reply', { post: _.clone(postData) });
 
 				next(null, postData);
@@ -343,7 +345,7 @@ module.exports = function (Topics) {
 	function check(item, min, max, minError, maxError, callback) {
 		// Trim and remove HTML (latter for composers that send in HTML, like redactor)
 		if (typeof item === 'string') {
-			item = S(item).stripTags().s.trim();
+			item = utils.stripHTMLTags(item).trim();
 		}
 
 		if (item === null || item === undefined || item.length < parseInt(min, 10)) {

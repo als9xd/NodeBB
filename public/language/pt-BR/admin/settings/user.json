@@ -13,10 +13,14 @@
 	"disable-email-changes": "Desabilitar mudanças de email",
 	"disable-password-changes": "Desabilitar mudanças de senha",
 	"allow-account-deletion": "Permitir exclusão de conta",
-	"user-info-private": "Tornar informação de usuário privada",
+	"user-info-private": "Esconder lista e dados de usuários de visitantes",
+	"hide-fullname": "Esconder nome completo de outros usuários",
+	"hide-email": "Esconder email de outros usuários",
 	"themes": "Temas",
 	"disable-user-skins": "Impedir usuários de escolherem um skin personalizado",
 	"account-protection": "Proteção de Conta",
+	"admin-relogin-duration": "Admin relogin duration (minutes)",
+	"admin-relogin-duration-help": "After a set amount of time accessing the admin section will require re-login, set to 0 to disable",
 	"login-attempts": "Tentativas de login por hora",
 	"login-attempts-help": "Se tentativas de login na conta de um usuário ultrapassar este limite, aquela conta será trancada por um período de tempo pré-configurado",
 	"lockout-duration": "Duração de Trancamento de Conta (minutos)",
@@ -58,5 +62,6 @@
 	"email-chat-notifs": "Envie um email se uma nova mensagem de chat chegar e eu não estiver online",
 	"email-post-notif": "Enviar um email quando respostas forem dadas à tópicos que estou inscrito",
 	"follow-created-topics": "Seguir tópicos que você criar",
-	"follow-replied-topics": "Seguir os tópicos que você responder"
+	"follow-replied-topics": "Seguir os tópicos que você responder",
+	"default-notification-settings": "Default notification settings"
 }

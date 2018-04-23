@@ -1,7 +1,7 @@
 'use strict';
 
 
-define('admin/manage/users', ['translator'], function (translator) {
+define('admin/manage/users', ['translator', 'benchpress'], function (translator, Benchpress) {
 	var Users = {};
 
 	Users.init = function () {
@@ -81,7 +81,7 @@ define('admin/manage/users', ['translator'], function (translator) {
 				return false;	// specifically to keep the menu open
 			}
 
-			templates.parse('admin/partials/temporary-ban', {}, function (html) {
+			Benchpress.parse('admin/partials/temporary-ban', {}, function (html) {
 				bootbox.dialog({
 					className: 'ban-modal',
 					title: '[[user:ban_account]]',
@@ -125,36 +125,6 @@ define('admin/manage/users', ['translator'], function (translator) {
 			}
 
 			socket.emit('admin.user.resetLockouts', uids, done('[[admin/manage/users:alerts.lockout-reset-success]]'));
-		});
-
-		$('.admin-user').on('click', function () {
-			var uids = getSelectedUids();
-			if (!uids.length) {
-				return;
-			}
-
-			if (uids.indexOf(app.user.uid.toString()) !== -1) {
-				app.alertError('[[admin/manage/users:alerts.no-remove-yourself-admin]]');
-			} else {
-				socket.emit('admin.user.makeAdmins', uids, done('[[admin/manage/users:alerts.make-admin-success]]', '.administrator', true));
-			}
-		});
-
-		$('.remove-admin-user').on('click', function () {
-			var uids = getSelectedUids();
-			if (!uids.length) {
-				return;
-			}
-
-			if (uids.indexOf(app.user.uid.toString()) !== -1) {
-				app.alertError('[[admin/manage/users:alerts.no-remove-yourself-admin]]');
-			} else {
-				bootbox.confirm('[[admin/manage/users:alerts.confirm-remove-admin]]', function (confirm) {
-					if (confirm) {
-						socket.emit('admin.user.removeAdmins', uids, done('[[admin/manage/users:alerts.remove-admin-success]]', '.administrator', false));
-					}
-				});
-			}
 		});
 
 		$('.validate-email').on('click', function () {
@@ -221,6 +191,9 @@ define('admin/manage/users', ['translator'], function (translator) {
 						app.alertSuccess('[[admin/manage/users:alerts.delete-success]]');
 						removeSelected();
 						unselectAll();
+						if (!$('.users-table [component="user/select/single"]').length) {
+							ajaxify.refresh();
+						}
 					});
 				}
 			});
@@ -241,6 +214,9 @@ define('admin/manage/users', ['translator'], function (translator) {
 						app.alertSuccess('[[admin/manage/users:alerts.delete-success]]');
 						removeSelected();
 						unselectAll();
+						if (!$('.users-table [component="user/select/single"]').length) {
+							ajaxify.refresh();
+						}
 					});
 				}
 			});
@@ -248,7 +224,7 @@ define('admin/manage/users', ['translator'], function (translator) {
 
 		function handleUserCreate() {
 			$('#createUser').on('click', function () {
-				templates.parse('admin/partials/create_user_modal', {}, function (html) {
+				Benchpress.parse('admin/partials/create_user_modal', {}, function (html) {
 					bootbox.dialog({
 						message: html,
 						title: '[[admin/manage/users:alerts.create]]',
@@ -306,7 +282,7 @@ define('admin/manage/users', ['translator'], function (translator) {
 
 		var timeoutId = 0;
 
-		$('#search-user-name, #search-user-email, #search-user-ip').on('keyup', function () {
+		$('#search-user-uid, #search-user-name, #search-user-email, #search-user-ip').on('keyup', function () {
 			if (timeoutId !== 0) {
 				clearTimeout(timeoutId);
 				timeoutId = 0;
@@ -323,7 +299,7 @@ define('admin/manage/users', ['translator'], function (translator) {
 						return app.alertError(err.message);
 					}
 
-					templates.parse('admin/manage/users', 'users', data, function (html) {
+					Benchpress.parse('admin/manage/users', 'users', data, function (html) {
 						translator.translate(html, function (html) {
 							html = $(html);
 							$('.users-table tr').not(':first').remove();

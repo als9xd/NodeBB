@@ -1,9 +1,8 @@
 'use strict';
 
 var fs = require('fs');
-var childProcess = require('child_process');
 var os = require('os');
-var uglifyjs = require('uglify-js');
+var uglify = require('uglify-es');
 var async = require('async');
 var winston = require('winston');
 var less = require('less');
@@ -11,7 +10,8 @@ var postcss = require('postcss');
 var autoprefixer = require('autoprefixer');
 var clean = require('postcss-clean');
 
-var debugParams = require('./debugParams');
+var fork = require('./debugFork');
+require('../file'); // for graceful-fs
 
 var Minifier = module.exports;
 
@@ -47,13 +47,12 @@ function getChild() {
 		return free.shift();
 	}
 
-	var forkProcessParams = debugParams();
-	var proc = childProcess.fork(__filename, [], Object.assign({}, forkProcessParams, {
+	var proc = fork(__filename, [], {
 		cwd: __dirname,
 		env: {
 			minifier_child: true,
 		},
-	}));
+	});
 	pool.push(proc);
 
 	return proc;
@@ -76,7 +75,7 @@ function forkAction(action, callback) {
 		freeChild(proc);
 
 		if (message.type === 'error') {
-			return callback(message.err);
+			return callback(message.message);
 		}
 
 		if (message.type === 'end') {
@@ -104,7 +103,7 @@ if (process.env.minifier_child) {
 			if (typeof actions[action.act] !== 'function') {
 				process.send({
 					type: 'error',
-					err: Error('Unknown action'),
+					message: 'Unknown action',
 				});
 				return;
 			}
@@ -113,7 +112,7 @@ if (process.env.minifier_child) {
 				if (err) {
 					process.send({
 						type: 'error',
-						err: err,
+						message: err.stack,
 					});
 					return;
 				}
@@ -141,12 +140,12 @@ function executeAction(action, fork, callback) {
 function concat(data, callback) {
 	if (data.files && data.files.length) {
 		async.mapLimit(data.files, 1000, function (ref, next) {
-			fs.readFile(ref.srcPath, function (err, buffer) {
+			fs.readFile(ref.srcPath, 'utf8', function (err, file) {
 				if (err) {
 					return next(err);
 				}
 
-				next(null, buffer.toString());
+				next(null, file);
 			});
 		}, function (err, files) {
 			if (err) {
@@ -165,91 +164,84 @@ function concat(data, callback) {
 actions.concat = concat;
 
 function minifyJS_batch(data, callback) {
-	async.eachLimit(data.files, 1000, function (ref, next) {
-		var srcPath = ref.srcPath;
-		var destPath = ref.destPath;
-		var filename = ref.filename;
-
-		fs.readFile(srcPath, function (err, buffer) {
+	async.each(data.files, function (fileObj, next) {
+		fs.readFile(fileObj.srcPath, 'utf8', function (err, source) {
 			if (err) {
 				return next(err);
 			}
 
-			var scripts = {};
-			scripts[filename] = buffer.toString();
-
-			try {
-				var minified = uglifyjs.minify(scripts, {
-					sourceMap: {
-						filename: filename,
-						url: filename + '.map',
-						includeSources: true,
-					},
-					compress: false,
-				});
-
-				async.parallel([
-					async.apply(fs.writeFile, destPath, minified.code),
-					async.apply(fs.writeFile, destPath + '.map', minified.map),
-				], next);
-			} catch (e) {
-				next(e);
-			}
+			var filesToMinify = [
+				{
+					srcPath: fileObj.srcPath,
+					filename: fileObj.filename,
+					source: source,
+				},
+			];
+			minifyAndSave({
+				files: filesToMinify,
+				destPath: fileObj.destPath,
+				filename: fileObj.filename,
+			}, next);
 		});
 	}, callback);
 }
 actions.minifyJS_batch = minifyJS_batch;
 
 function minifyJS(data, callback) {
-	async.mapLimit(data.files, 1000, function (ref, next) {
-		var srcPath = ref.srcPath;
-		var filename = ref.filename;
-
-		fs.readFile(srcPath, function (err, buffer) {
+	async.mapLimit(data.files, 1000, function (fileObj, next) {
+		fs.readFile(fileObj.srcPath, 'utf8', function (err, source) {
 			if (err) {
 				return next(err);
 			}
 
 			next(null, {
-				srcPath: srcPath,
-				filename: filename,
-				source: buffer.toString(),
+				srcPath: fileObj.srcPath,
+				filename: fileObj.filename,
+				source: source,
 			});
 		});
-	}, function (err, files) {
+	}, function (err, filesToMinify) {
 		if (err) {
 			return callback(err);
 		}
 
-		var scripts = {};
-		files.forEach(function (ref) {
-			if (!ref) {
-				return;
-			}
-
-			scripts[ref.filename] = ref.source;
-		});
-
-		try {
-			var minified = uglifyjs.minify(scripts, {
-				sourceMap: {
-					filename: data.filename,
-					url: data.filename + '.map',
-					includeSources: true,
-				},
-				compress: false,
-			});
-
-			async.parallel([
-				async.apply(fs.writeFile, data.destPath, minified.code),
-				async.apply(fs.writeFile, data.destPath + '.map', minified.map),
-			], callback);
-		} catch (e) {
-			callback(e);
-		}
+		minifyAndSave({
+			files: filesToMinify,
+			destPath: data.destPath,
+			filename: data.filename,
+		}, callback);
 	});
 }
 actions.minifyJS = minifyJS;
+
+function minifyAndSave(data, callback) {
+	var scripts = {};
+	data.files.forEach(function (ref) {
+		if (!ref) {
+			return;
+		}
+
+		scripts[ref.filename] = ref.source;
+	});
+
+	var minified = uglify.minify(scripts, {
+		sourceMap: {
+			filename: data.filename,
+			url: data.filename + '.map',
+			includeSources: true,
+		},
+		compress: false,
+	});
+
+	if (minified.error) {
+		return callback({ stack: 'Error minifying ' + minified.error.filename + '\n' + minified.error.stack });
+	}
+
+	async.parallel([
+		async.apply(fs.writeFile, data.destPath, minified.code),
+		async.apply(fs.writeFile, data.destPath + '.map', minified.map),
+	], callback);
+}
 
 Minifier.js = {};
 Minifier.js.bundle = function (data, minify, fork, callback) {
@@ -281,10 +273,12 @@ function buildCSS(data, callback) {
 			clean({
 				processImportFrom: ['local'],
 			}),
-		] : [autoprefixer]).process(lessOutput.css).then(function (result) {
-			callback(null, { code: result.css });
+		] : [autoprefixer]).process(lessOutput.css, {
+			from: undefined,
+		}).then(function (result) {
+			process.nextTick(callback, null, { code: result.css });
 		}, function (err) {
-			callback(err);
+			process.nextTick(callback, err);
 		});
 	});
 }

@@ -2,13 +2,14 @@
 
 var async = require('async');
 var winston = require('winston');
-var templates = require('templates.js');
 var _ = require('lodash');
+var Benchpress = require('benchpressjs');
 
 var plugins = require('../plugins');
 var translator = require('../translator');
 var db = require('../database');
 var apiController = require('../controllers/api');
+var meta = require('../meta');
 
 var widgets = module.exports;
 
@@ -31,7 +32,7 @@ widgets.render = function (uid, options, callback) {
 			var returnData = {};
 
 			async.each(locations, function (location, done) {
-				widgetsByLocation[location] = (data.global[location] || []).concat(data[options.template][location] || []);
+				widgetsByLocation[location] = (data[options.template][location] || []).concat(data.global[location] || []);
 
 				if (!widgetsByLocation[location].length) {
 					return done(null, { location: location, widgets: [] });
@@ -61,15 +62,17 @@ widgets.render = function (uid, options, callback) {
 };
 
 function renderWidget(widget, uid, options, callback) {
+	var userLang;
 	async.waterfall([
 		function (next) {
 			if (options.res.locals.isAPI) {
 				apiController.loadConfig(options.req, next);
 			} else {
-				next(null, options.res.locals.config);
+				next(null, options.res.locals.config || {});
 			}
 		},
 		function (config, next) {
+			userLang = config.userLang || meta.config.defaultLang || 'en-GB';
 			var templateData = _.assign({ }, options.templateData, { config: config });
 			plugins.fireHook('filter:widget.render:' + widget.widget, {
 				uid: uid,
@@ -92,17 +95,19 @@ function renderWidget(widget, uid, options, callback) {
 			}
 
 			if (widget.data.container && widget.data.container.match('{body}')) {
-				translator.translate(widget.data.title, function (title) {
-					html = templates.parse(widget.data.container, {
-						title: title,
-						body: html,
-					});
-
-					next(null, { html: html });
-				});
+				Benchpress.compileParse(widget.data.container, {
+					title: widget.data.title,
+					body: html,
+					template: data.templateData.template,
+				}, next);
 			} else {
-				next(null, { html: html });
+				next(null, html);
 			}
+		},
+		function (html, next) {
+			translator.translate(html, userLang, function (translatedHtml) {
+				next(null, { html: translatedHtml });
+			});
 		},
 	], callback);
 }
@@ -214,6 +219,34 @@ widgets.reset = function (callback) {
 			}, next);
 		},
 	], callback);
+};
+
+widgets.resetTemplate = function (template, callback) {
+	var toBeDrafted = [];
+	async.waterfall([
+		function (next) {
+			db.getObject('widgets:' + template + '.tpl', next);
+		},
+		function (area, next) {
+			for (var location in area) {
+				if (area.hasOwnProperty(location)) {
+					toBeDrafted = toBeDrafted.concat(JSON.parse(area[location]));
+				}
+			}
+			db.delete('widgets:' + template + '.tpl', next);
+		},
+		function (next) {
+			db.getObjectField('widgets:global', 'drafts', next);
+		},
+		function (draftWidgets, next) {
+			draftWidgets = JSON.parse(draftWidgets).concat(toBeDrafted);
+			db.setObjectField('widgets:global', 'drafts', JSON.stringify(draftWidgets), next);
+		},
+	], callback);
+};
+
+widgets.resetTemplates = function (templates, callback) {
+	async.eachSeries(templates, widgets.resetTemplate, callback);
 };
 
 module.exports = widgets;

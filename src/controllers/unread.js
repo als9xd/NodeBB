@@ -2,9 +2,10 @@
 'use strict';
 
 var async = require('async');
+var nconf = require('nconf');
 var querystring = require('querystring');
-var validator = require('validator');
 
+var meta = require('../meta');
 var pagination = require('../pagination');
 var user = require('../user');
 var topics = require('../topics');
@@ -12,8 +13,6 @@ var plugins = require('../plugins');
 var helpers = require('./helpers');
 
 var unreadController = module.exports;
-
-var validFilter = { '': true, new: true, watched: true };
 
 unreadController.get = function (req, res, next) {
 	var page = parseInt(req.query.page, 10) || 1;
@@ -24,7 +23,7 @@ unreadController.get = function (req, res, next) {
 
 	async.waterfall([
 		function (next) {
-			plugins.fireHook('filter:unread.getValidFilters', { filters: validFilter }, next);
+			plugins.fireHook('filter:unread.getValidFilters', { filters: Object.assign({}, helpers.validFilters) }, next);
 		},
 		function (data, _next) {
 			if (!data.filters[filter]) {
@@ -56,6 +55,7 @@ unreadController.get = function (req, res, next) {
 			}, next);
 		},
 		function (data) {
+			data.title = meta.config.homePageTitle || '[[pages:home]]';
 			data.pageCount = Math.max(1, Math.ceil(data.topicCount / settings.topicsPerPage));
 			data.pagination = pagination.create(page, data.pageCount, req.query);
 
@@ -66,35 +66,19 @@ unreadController.get = function (req, res, next) {
 
 			data.categories = results.watchedCategories.categories;
 			data.selectedCategory = results.watchedCategories.selectedCategory;
-
-			if (req.path.startsWith('/api/unread') || req.path.startsWith('/unread')) {
+			data.selectedCids = results.watchedCategories.selectedCids;
+			if (req.originalUrl.startsWith(nconf.get('relative_path') + '/api/unread') || req.originalUrl.startsWith(nconf.get('relative_path') + '/unread')) {
+				data.title = '[[pages:unread]]';
 				data.breadcrumbs = helpers.buildBreadcrumbs([{ text: '[[unread:title]]' }]);
 			}
 
-			data.title = '[[pages:unread]]';
-			data.filters = [{
-				name: '[[unread:all-topics]]',
-				url: 'unread',
-				selected: filter === '',
-				filter: '',
-			}, {
-				name: '[[unread:new-topics]]',
-				url: 'unread/new',
-				selected: filter === 'new',
-				filter: 'new',
-			}, {
-				name: '[[unread:watched-topics]]',
-				url: 'unread/watched',
-				selected: filter === 'watched',
-				filter: 'watched',
-			}];
+			data.filters = helpers.buildFilters('unread', filter);
 
 			data.selectedFilter = data.filters.find(function (filter) {
 				return filter && filter.selected;
 			});
 
-			data.querystring = cid ? ('?cid=' + validator.escape(String(cid))) : '';
-
+			data.querystring = cid ? '?' + querystring.stringify({ cid: cid }) : '';
 			res.render('unread', data);
 		},
 	], next);
@@ -105,10 +89,10 @@ unreadController.unreadTotal = function (req, res, next) {
 
 	async.waterfall([
 		function (next) {
-			plugins.fireHook('filter:unread.getValidFilters', { filters: validFilter }, next);
+			plugins.fireHook('filter:unread.getValidFilters', { filters: Object.assign({}, helpers.validFilters) }, next);
 		},
 		function (data, _next) {
-			if (!validFilter[filter]) {
+			if (!data.filters[filter]) {
 				return next();
 			}
 			topics.getTotalUnread(req.uid, filter, _next);

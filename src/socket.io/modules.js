@@ -11,6 +11,7 @@ var Messaging = require('../messaging');
 var utils = require('../utils');
 var server = require('./');
 var user = require('../user');
+var privileges = require('../privileges');
 
 var SocketModules = module.exports;
 
@@ -21,17 +22,31 @@ SocketModules.settings = {};
 /* Chat */
 
 SocketModules.chats.getRaw = function (socket, data, callback) {
-	if (!data || !data.hasOwnProperty('mid') || !data.hasOwnProperty('roomId')) {
+	if (!data || !data.hasOwnProperty('mid')) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 	async.waterfall([
 		function (next) {
-			Messaging.isUserInRoom(socket.uid, data.roomId, next);
+			Messaging.getMessageField(data.mid, 'roomId', next);
 		},
-		function (inRoom, next) {
-			if (!inRoom) {
+		function (roomId, next) {
+			async.parallel({
+				isAdmin: function (next) {
+					user.isAdministrator(socket.uid, next);
+				},
+				hasMessage: function (next) {
+					db.isSortedSetMember('uid:' + socket.uid + ':chat:room:' + roomId + ':mids', data.mid, next);
+				},
+				inRoom: function (next) {
+					Messaging.isUserInRoom(socket.uid, roomId, next);
+				},
+			}, next);
+		},
+		function (results, next) {
+			if (!results.isAdmin && (!results.inRoom || !results.hasMessage)) {
 				return next(new Error('[[error:not-allowed]]'));
 			}
+
 			Messaging.getMessageField(data.mid, 'content', next);
 		},
 	], callback);
@@ -59,6 +74,12 @@ SocketModules.chats.newRoom = function (socket, data, callback) {
 
 	async.waterfall([
 		function (next) {
+			privileges.global.can('chat', socket.uid, next);
+		},
+		function (canChat, next) {
+			if (!canChat) {
+				return next(new Error('[[error:no-privileges]]'));
+			}
 			Messaging.canMessageUser(socket.uid, data.touid, next);
 		},
 		function (next) {
@@ -78,6 +99,13 @@ SocketModules.chats.send = function (socket, data, callback) {
 
 	async.waterfall([
 		function (next) {
+			privileges.global.can('chat', socket.uid, next);
+		},
+		function (canChat, next) {
+			if (!canChat) {
+				return next(new Error('[[error:no-privileges]]'));
+			}
+
 			plugins.fireHook('filter:messaging.send', {
 				data: data,
 				uid: socket.uid,
@@ -119,6 +147,13 @@ SocketModules.chats.loadRoom = function (socket, data, callback) {
 
 	async.waterfall([
 		function (next) {
+			privileges.global.can('chat', socket.uid, next);
+		},
+		function (canChat, next) {
+			if (!canChat) {
+				return next(new Error('[[error:no-privileges]]'));
+			}
+
 			Messaging.isUserInRoom(socket.uid, data.roomId, next);
 		},
 		function (inRoom, next) {
@@ -153,6 +188,14 @@ SocketModules.chats.loadRoom = function (socket, data, callback) {
 	], callback);
 };
 
+SocketModules.chats.getUsersInRoom = function (socket, data, callback) {
+	if (!data || !data.roomId) {
+		return callback(new Error('[[error:invalid-data]]'));
+	}
+
+	Messaging.getUsersInRoom(data.roomId, 0, -1, callback);
+};
+
 SocketModules.chats.addUserToRoom = function (socket, data, callback) {
 	if (!data || !data.roomId || !data.username) {
 		return callback(new Error('[[error:invalid-data]]'));
@@ -160,6 +203,13 @@ SocketModules.chats.addUserToRoom = function (socket, data, callback) {
 	var uid;
 	async.waterfall([
 		function (next) {
+			privileges.global.can('chat', socket.uid, next);
+		},
+		function (canChat, next) {
+			if (!canChat) {
+				return next(new Error('[[error:no-privileges]]'));
+			}
+
 			Messaging.getUserCountInRoom(data.roomId, next);
 		},
 		function (userCount, next) {
@@ -178,7 +228,7 @@ SocketModules.chats.addUserToRoom = function (socket, data, callback) {
 				return next(new Error('[[error:no-user]]'));
 			}
 			if (socket.uid === parseInt(uid, 10)) {
-				return next(new Error('[[error:cant-add-self-to-chat-room]]'));
+				return next(new Error('[[error:cant-chat-with-yourself]]'));
 			}
 			async.parallel({
 				settings: async.apply(user.getSettings, uid),
@@ -232,10 +282,7 @@ SocketModules.chats.edit = function (socket, data, callback) {
 		function (next) {
 			Messaging.canEdit(data.mid, socket.uid, next);
 		},
-		function (allowed, next) {
-			if (!allowed) {
-				return next(new Error('[[error:cant-edit-chat-message]]'));
-			}
+		function (next) {
 			Messaging.editMessage(socket.uid, data.mid, data.roomId, data.message, next);
 		},
 	], callback);
@@ -248,14 +295,25 @@ SocketModules.chats.delete = function (socket, data, callback) {
 
 	async.waterfall([
 		function (next) {
-			Messaging.canEdit(data.messageId, socket.uid, next);
+			Messaging.canDelete(data.messageId, socket.uid, next);
 		},
-		function (allowed, next) {
-			if (!allowed) {
-				return next(new Error('[[error:cant-delete-chat-message]]'));
-			}
-
+		function (next) {
 			Messaging.deleteMessage(data.messageId, data.roomId, next);
+		},
+	], callback);
+};
+
+SocketModules.chats.restore = function (socket, data, callback) {
+	if (!data || !data.roomId || !data.messageId) {
+		return callback(new Error('[[error:invalid-data]]'));
+	}
+
+	async.waterfall([
+		function (next) {
+			Messaging.canDelete(data.messageId, socket.uid, next);
+		},
+		function (next) {
+			Messaging.restoreMessage(data.messageId, data.roomId, next);
 		},
 	], callback);
 };

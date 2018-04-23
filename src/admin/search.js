@@ -14,10 +14,12 @@ function filterDirectories(directories) {
 		// get the relative path
 		return dir.replace(/^.*(admin.*?).tpl$/, '$1');
 	}).filter(function (dir) {
+		// exclude .js files
 		// exclude partials
 		// only include subpaths
 		// exclude category.tpl, group.tpl, category-analytics.tpl
-		return !dir.includes('/partials/') &&
+		return !dir.endsWith('.js') &&
+			!dir.includes('/partials/') &&
 			/\/.*\//.test(dir) &&
 			!/manage\/(category|group|category-analytics)$/.test(dir);
 	});
@@ -61,12 +63,11 @@ var fallbackCacheInProgress = {};
 var fallbackCache = {};
 
 function initFallback(namespace, callback) {
-	fs.readFile(path.resolve(nconf.get('views_dir'), namespace + '.tpl'), function (err, file) {
+	fs.readFile(path.resolve(nconf.get('views_dir'), namespace + '.tpl'), 'utf8', function (err, template) {
 		if (err) {
 			return callback(err);
 		}
 
-		var template = file.toString();
 		var title = nsToTitle(namespace);
 
 		var translations = sanitize(template);

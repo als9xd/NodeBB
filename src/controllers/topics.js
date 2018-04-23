@@ -2,7 +2,6 @@
 
 
 var async = require('async');
-var S = require('string');
 var nconf = require('nconf');
 
 var user = require('../user');
@@ -147,7 +146,7 @@ topicsController.get = function (req, res, callback) {
 			topicData.postDeleteDuration = parseInt(meta.config.postDeleteDuration, 10) || 0;
 			topicData.scrollToMyPost = settings.scrollToMyPost;
 			topicData.rssFeedUrl = nconf.get('relative_path') + '/topic/' + topicData.tid + '.rss';
-			if (req.uid) {
+			if (req.loggedIn) {
 				topicData.rssFeedUrl += '?uid=' + req.uid + '&token=' + rssToken;
 			}
 
@@ -166,7 +165,7 @@ topicsController.get = function (req, res, callback) {
 				req.session.tids_viewed[tid] = Date.now();
 			}
 
-			if (req.uid) {
+			if (req.loggedIn) {
 				topics.markAsRead([tid], req.uid, function (err, markedRead) {
 					if (err) {
 						return callback(err);
@@ -206,42 +205,20 @@ function buildBreadcrumbs(topicData, callback) {
 }
 
 function addTags(topicData, req, res) {
-	function findPost(index) {
-		for (var i = 0; i < topicData.posts.length; i += 1) {
-			if (parseInt(topicData.posts[i].index, 10) === parseInt(index, 10)) {
-				return topicData.posts[i];
-			}
-		}
-	}
-	var description = '';
-	var postAtIndex = findPost(Math.max(0, req.params.post_index - 1));
+	var postAtIndex = topicData.posts.find(function (postData) {
+		return parseInt(postData.index, 10) === parseInt(Math.max(0, req.params.post_index - 1), 10);
+	});
 
+	var description = '';
 	if (postAtIndex && postAtIndex.content) {
-		description = S(postAtIndex.content).decodeHTMLEntities().stripTags().s;
+		description = utils.stripHTMLTags(utils.decodeHTMLEntities(postAtIndex.content));
 	}
 
 	if (description.length > 255) {
 		description = description.substr(0, 255) + '...';
 	}
-
-	var ogImageUrl = '';
-	if (topicData.thumb) {
-		ogImageUrl = topicData.thumb;
-	} else if (postAtIndex && postAtIndex.user && postAtIndex.user.picture) {
-		ogImageUrl = postAtIndex.user.picture;
-	} else if (meta.config['og:image']) {
-		ogImageUrl = meta.config['og:image'];
-	} else if (meta.config['brand:logo']) {
-		ogImageUrl = meta.config['brand:logo'];
-	} else {
-		ogImageUrl = '/logo.png';
-	}
-
-	if (typeof ogImageUrl === 'string' && ogImageUrl.indexOf('http') === -1) {
-		ogImageUrl = nconf.get('url') + ogImageUrl;
-	}
-
 	description = description.replace(/\n/g, ' ');
+
 	res.locals.metaTags = [
 		{
 			name: 'title',
@@ -264,16 +241,6 @@ function addTags(topicData, req, res) {
 			content: 'article',
 		},
 		{
-			property: 'og:image',
-			content: ogImageUrl,
-			noEscape: true,
-		},
-		{
-			property: 'og:image:url',
-			content: ogImageUrl,
-			noEscape: true,
-		},
-		{
 			property: 'article:published_time',
 			content: utils.toISOString(topicData.timestamp),
 		},
@@ -287,13 +254,22 @@ function addTags(topicData, req, res) {
 		},
 	];
 
+	addOGImageTags(res, topicData, postAtIndex);
+
 	res.locals.linkTags = [
 		{
+			rel: 'canonical',
+			href: nconf.get('url') + '/topic/' + topicData.slug,
+		},
+	];
+
+	if (!topicData['feeds:disableRSS']) {
+		res.locals.linkTags.push({
 			rel: 'alternate',
 			type: 'application/rss+xml',
 			href: topicData.rssFeedUrl,
-		},
-	];
+		});
+	}
 
 	if (topicData.category) {
 		res.locals.linkTags.push({
@@ -301,6 +277,60 @@ function addTags(topicData, req, res) {
 			href: nconf.get('url') + '/category/' + topicData.category.slug,
 		});
 	}
+}
+
+function addOGImageTags(res, topicData, postAtIndex) {
+	var ogImageUrl = '';
+	if (topicData.thumb) {
+		ogImageUrl = topicData.thumb;
+	} else if (topicData.category.backgroundImage && (!postAtIndex || !postAtIndex.index)) {
+		ogImageUrl = topicData.category.backgroundImage;
+	} else if (postAtIndex && postAtIndex.user && postAtIndex.user.picture) {
+		ogImageUrl = postAtIndex.user.picture;
+	} else if (meta.config['og:image']) {
+		ogImageUrl = meta.config['og:image'];
+	} else if (meta.config['brand:logo']) {
+		ogImageUrl = meta.config['brand:logo'];
+	} else {
+		ogImageUrl = '/logo.png';
+	}
+
+	addOGImageTag(res, ogImageUrl);
+	addOGImageTagsForPosts(res, topicData.posts);
+}
+
+function addOGImageTagsForPosts(res, posts) {
+	posts.forEach(function (postData) {
+		var regex = /src\s*=\s*"(.+?)"/g;
+		var match = regex.exec(postData.content);
+		while (match !== null) {
+			var image = match[1];
+
+			if (image.startsWith(nconf.get('url') + '/plugins')) {
+				return;
+			}
+
+			addOGImageTag(res, image);
+
+			match = regex.exec(postData.content);
+		}
+	});
+}
+
+function addOGImageTag(res, imageUrl) {
+	if (typeof imageUrl === 'string' && !imageUrl.startsWith('http')) {
+		imageUrl = nconf.get('url') + imageUrl;
+	}
+	res.locals.metaTags.push({
+		property: 'og:image',
+		content: imageUrl,
+		noEscape: true,
+	});
+	res.locals.metaTags.push({
+		property: 'og:image:url',
+		content: imageUrl,
+		noEscape: true,
+	});
 }
 
 topicsController.teaser = function (req, res, next) {
@@ -357,7 +387,7 @@ topicsController.pagination = function (req, res, callback) {
 		}
 
 		var postCount = parseInt(results.topic.postcount, 10);
-		var pageCount = Math.max(1, Math.ceil((postCount - 1) / results.settings.postsPerPage));
+		var pageCount = Math.max(1, Math.ceil(postCount / results.settings.postsPerPage));
 
 		var paginationData = pagination.create(currentPage, pageCount);
 		paginationData.rel.forEach(function (rel) {

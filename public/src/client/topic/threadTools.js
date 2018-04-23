@@ -5,9 +5,11 @@ define('forum/topic/threadTools', [
 	'forum/topic/fork',
 	'forum/topic/move',
 	'forum/topic/delete-posts',
+	'forum/topic/move-post',
 	'components',
 	'translator',
-], function (fork, move, deletePosts, components, translator) {
+	'benchpress',
+], function (fork, move, deletePosts, movePosts, components, translator, Benchpress) {
 	var ThreadTools = {};
 
 	ThreadTools.init = function (tid) {
@@ -79,6 +81,7 @@ define('forum/topic/threadTools', [
 
 		deletePosts.init();
 		fork.init();
+		movePosts.init();
 
 		$('.topic').on('click', '[component="topic/following"]', function () {
 			changeWatching('follow');
@@ -138,7 +141,7 @@ define('forum/topic/threadTools', [
 					return app.alertError(err);
 				}
 
-				templates.parse('partials/topic/topic-menu-list', data, function (html) {
+				Benchpress.parse('partials/topic/topic-menu-list', data, function (html) {
 					translator.translate(html, function (html) {
 						dropdownMenu.html(html);
 						$(window).trigger('action:topic.tools.load');

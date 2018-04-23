@@ -20,6 +20,7 @@ require('./posts/move')(SocketPosts);
 require('./posts/votes')(SocketPosts);
 require('./posts/bookmarks')(SocketPosts);
 require('./posts/tools')(SocketPosts);
+require('./posts/diffs')(SocketPosts);
 
 SocketPosts.reply = function (socket, data, callback) {
 	if (!data || !data.tid || (parseInt(meta.config.minimumPostLength, 10) !== 0 && !data.content)) {
@@ -30,6 +31,21 @@ SocketPosts.reply = function (socket, data, callback) {
 	data.req = websockets.reqFromSocket(socket);
 	data.timestamp = Date.now();
 
+	async.waterfall([
+		function (next) {
+			posts.shouldQueue(socket.uid, data, next);
+		},
+		function (shouldQueue, next) {
+			if (shouldQueue) {
+				posts.addToQueue(data, next);
+			} else {
+				postReply(socket, data, next);
+			}
+		},
+	], callback);
+};
+
+function postReply(socket, data, callback) {
 	async.waterfall([
 		function (next) {
 			topics.reply(data, next);
@@ -50,7 +66,7 @@ SocketPosts.reply = function (socket, data, callback) {
 			socketHelpers.notifyNew(socket.uid, 'newPost', result);
 		},
 	], callback);
-};
+}
 
 SocketPosts.getRawPost = function (socket, pid, callback) {
 	async.waterfall([
@@ -152,3 +168,33 @@ SocketPosts.getReplies = function (socket, pid, callback) {
 		},
 	], callback);
 };
+
+SocketPosts.accept = function (socket, data, callback) {
+	acceptOrReject(posts.submitFromQueue, socket, data, callback);
+};
+
+SocketPosts.reject = function (socket, data, callback) {
+	acceptOrReject(posts.removeFromQueue, socket, data, callback);
+};
+
+SocketPosts.editQueuedContent = function (socket, data, callback) {
+	if (!data || !data.id || !data.content) {
+		return callback(new Error('[[error:invalid-data]]'));
+	}
+	posts.editQueuedContent(socket.uid, data.id, data.content, callback);
+};
+
+function acceptOrReject(method, socket, data, callback) {
+	async.waterfall([
+		function (next) {
+			posts.canEditQueue(socket.uid, data.id, next);
+		},
+		function (canEditQueue, next) {
+			if (!canEditQueue) {
+				return callback(new Error('[[error:no-privileges]]'));
+			}
+
+			method(data.id, next);
+		},
+	], callback);
+}

@@ -19,8 +19,8 @@ describe('Hash methods', function () {
 	describe('setObject()', function () {
 		it('should create a object', function (done) {
 			db.setObject('testObject1', { foo: 'baris', bar: 99 }, function (err) {
-				assert.equal(err, null);
-				assert.equal(arguments.length, 1);
+				assert.ifError(err);
+				assert(arguments.length < 2);
 				done();
 			});
 		});
@@ -57,16 +57,16 @@ describe('Hash methods', function () {
 	describe('setObjectField()', function () {
 		it('should create a new object with field', function (done) {
 			db.setObjectField('testObject2', 'name', 'ginger', function (err) {
-				assert.equal(err, null);
-				assert.equal(arguments.length, 1);
+				assert.ifError(err);
+				assert(arguments.length < 2);
 				done();
 			});
 		});
 
 		it('should add a new field to an object', function (done) {
 			db.setObjectField('testObject2', 'type', 'cat', function (err) {
-				assert.equal(err, null);
-				assert.equal(arguments.length, 1);
+				assert.ifError(err, null);
+				assert(arguments.length < 2);
 				done();
 			});
 		});
@@ -305,10 +305,10 @@ describe('Hash methods', function () {
 
 		it('should delete an objects field', function (done) {
 			db.deleteObjectField('testObject10', 'delete', function (err) {
-				assert.equal(err, null);
-				assert.equal(arguments.length, 1);
+				assert.ifError(err);
+				assert(arguments.length < 2);
 				db.isObjectField('testObject10', 'delete', function (err, isField) {
-					assert.equal(err, null);
+					assert.ifError(err);
 					assert.equal(isField, false);
 					done();
 				});
@@ -318,7 +318,7 @@ describe('Hash methods', function () {
 		it('should delete multiple fields of the object', function (done) {
 			db.deleteObjectFields('testObject10', ['delete1', 'delete2'], function (err) {
 				assert.ifError(err);
-				assert.equal(arguments.length, 1);
+				assert(arguments.length < 2);
 				async.parallel({
 					delete1: async.apply(db.isObjectField, 'testObject10', 'delete1'),
 					delete2: async.apply(db.isObjectField, 'testObject10', 'delete2'),
@@ -328,6 +328,34 @@ describe('Hash methods', function () {
 					assert.equal(results.delete2, false);
 					done();
 				});
+			});
+		});
+
+		it('should not error if key is undefined', function (done) {
+			db.deleteObjectField(undefined, 'someField', function (err) {
+				assert.ifError(err);
+				done();
+			});
+		});
+
+		it('should not error if key is null', function (done) {
+			db.deleteObjectField(null, 'someField', function (err) {
+				assert.ifError(err);
+				done();
+			});
+		});
+
+		it('should not error if field is undefined', function (done) {
+			db.deleteObjectField('someKey', undefined, function (err) {
+				assert.ifError(err);
+				done();
+			});
+		});
+
+		it('should not error if field is null', function (done) {
+			db.deleteObjectField('someKey', null, function (err) {
+				assert.ifError(err);
+				done();
 			});
 		});
 	});
@@ -378,6 +406,16 @@ describe('Hash methods', function () {
 				done();
 			});
 		});
+
+		it('should decrement multiple objects field by 1 and return an array of new values', function (done) {
+			db.decrObjectField(['testObject13', 'testObject14', 'decrTestObject'], 'age', function (err, data) {
+				assert.ifError(err);
+				assert.equal(data[0], 97);
+				assert.equal(data[1], -1);
+				assert.equal(data[2], -1);
+				done();
+			});
+		});
 	});
 
 	describe('incrObjectFieldBy()', function () {
@@ -408,6 +446,18 @@ describe('Hash methods', function () {
 				assert.ifError(err);
 				assert.equal(newValue, 122);
 				done();
+			});
+		});
+
+		it('should return null if value is NaN', function (done) {
+			db.incrObjectFieldBy('testObject15', 'lastonline', 'notanumber', function (err, newValue) {
+				assert.ifError(err);
+				assert.strictEqual(newValue, null);
+				db.isObjectField('testObject15', 'lastonline', function (err, isField) {
+					assert.ifError(err);
+					assert(!isField);
+					done();
+				});
 			});
 		});
 	});

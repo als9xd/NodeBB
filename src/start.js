@@ -98,13 +98,13 @@ function setupConfigs() {
 	nconf.set('secure', urlObject.protocol === 'https:');
 	nconf.set('use_port', !!urlObject.port);
 	nconf.set('relative_path', relativePath);
-	nconf.set('port', urlObject.port || nconf.get('port') || (nconf.get('PORT_ENV_VAR') ? nconf.get(nconf.get('PORT_ENV_VAR')) : false) || 4567);
+	nconf.set('port', nconf.get('PORT') || nconf.get('port') || urlObject.port || (nconf.get('PORT_ENV_VAR') ? nconf.get(nconf.get('PORT_ENV_VAR')) : false) || 4567);
 	nconf.set('upload_url', '/assets/uploads');
 }
 
 function printStartupInfo() {
 	if (nconf.get('isPrimary') === 'true') {
-		winston.info('Initializing NodeBB v%s', nconf.get('version'));
+		winston.info('Initializing NodeBB v%s %s', nconf.get('version'), nconf.get('url'));
 
 		var host = nconf.get(nconf.get('database') + ':host');
 		var storeLocation = host ? 'at ' + host + (host.indexOf('/') === -1 ? ':' + nconf.get(nconf.get('database') + ':port') : '') : '';
@@ -153,11 +153,21 @@ function restart() {
 
 function shutdown(code) {
 	winston.info('[app] Shutdown (SIGTERM/SIGINT) Initialised.');
-	require('./database').close();
-	winston.info('[app] Database connection closed.');
-	require('./webserver').server.close();
-	winston.info('[app] Web server closed to connections.');
-
-	winston.info('[app] Shutdown complete.');
-	process.exit(code || 0);
+	async.waterfall([
+		function (next) {
+			require('./webserver').destroy(next);
+		},
+		function (next) {
+			winston.info('[app] Web server closed to connections.');
+			require('./database').close(next);
+		},
+	], function (err) {
+		if (err) {
+			winston.error(err);
+			return process.exit(code || 0);
+		}
+		winston.info('[app] Database connection closed.');
+		winston.info('[app] Shutdown complete.');
+		process.exit(code || 0);
+	});
 }

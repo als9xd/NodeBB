@@ -6,7 +6,8 @@ define('forum/account/header', [
 	'pictureCropper',
 	'components',
 	'translator',
-], function (coverPhoto, pictureCropper, components, translator) {
+	'benchpress',
+], function (coverPhoto, pictureCropper, components, translator, Benchpress) {
 	var AccountHeader = {};
 	var isAdminOrSelfOrGlobalMod;
 
@@ -72,7 +73,8 @@ define('forum/account/header', [
 	}
 
 	function setupCoverPhoto() {
-		coverPhoto.init(components.get('account/cover'),
+		coverPhoto.init(
+			components.get('account/cover'),
 			function (imageData, position, callback) {
 				socket.emit('user.updateCover', {
 					uid: ajaxify.data.uid,
@@ -91,7 +93,8 @@ define('forum/account/header', [
 					paramValue: ajaxify.data.theirid,
 					accept: '.png,.jpg,.bmp',
 				}, function (imageUrlOnServer) {
-					components.get('account/cover').css('background-image', 'url(' + imageUrlOnServer + '?' + config['cache-buster'] + ')');
+					imageUrlOnServer = (!imageUrlOnServer.startsWith('http') ? config.relative_path : '') + imageUrlOnServer + '?' + Date.now();
+					components.get('account/cover').css('background-image', 'url(' + imageUrlOnServer + ')');
 				});
 			},
 			removeCover
@@ -114,7 +117,7 @@ define('forum/account/header', [
 	}
 
 	function banAccount() {
-		templates.parse('admin/partials/temporary-ban', {}, function (html) {
+		Benchpress.parse('admin/partials/temporary-ban', {}, function (html) {
 			bootbox.dialog({
 				className: 'ban-modal',
 				title: '[[user:ban_account]]',

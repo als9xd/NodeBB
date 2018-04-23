@@ -39,15 +39,7 @@ module.exports = function (Plugins) {
 				(Plugins.deprecatedHooks[data.hook] ?
 					'please use `' + Plugins.deprecatedHooks[data.hook] + '` instead.' :
 					'there is no alternative.'
-				)
-			);
-		} else {
-			// handle hook's startsWith, i.e. action:homepage.get
-			var parts = data.hook.split(':');
-			if (parts.length > 2) {
-				parts.pop();
-			}
-			parts.join(':');
+				));
 		}
 
 		if (data.hook && data.method) {
@@ -61,7 +53,7 @@ module.exports = function (Plugins) {
 					if (memo && memo[prop]) {
 						return memo[prop];
 					}
-						// Couldn't find method by path, aborting
+					// Couldn't find method by path, aborting
 					return null;
 				}, Plugins.libraries[data.id]);
 
@@ -90,7 +82,6 @@ module.exports = function (Plugins) {
 
 		var hookList = Plugins.loadedHooks[hook];
 		var hookType = hook.split(':')[0];
-
 		switch (hookType) {
 		case 'filter':
 			fireFilterHook(hook, hookList, params, callback);
@@ -103,6 +94,7 @@ module.exports = function (Plugins) {
 			break;
 		default:
 			winston.warn('[plugins] Unknown hookType: ' + hookType + ', hook : ' + hook);
+			callback();
 			break;
 		}
 	};
@@ -121,13 +113,7 @@ module.exports = function (Plugins) {
 			}
 
 			hookObj.method(params, next);
-		}, function (err, values) {
-			if (err) {
-				winston.error('[plugins] ' + hook + ',  ' + err.message);
-			}
-
-			callback(err, values);
-		});
+		}, callback);
 	}
 
 	function fireActionHook(hook, hookList, params, callback) {

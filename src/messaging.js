@@ -2,7 +2,7 @@
 
 
 var async = require('async');
-var S = require('string');
+var validator = require('validator');
 
 var db = require('./database');
 var user = require('./user');
@@ -56,6 +56,16 @@ Messaging.getMessages = function (params, callback) {
 			messageData.forEach(function (messageData) {
 				messageData.index = indices[messageData.messageId.toString()];
 			});
+
+			// Filter out deleted messages unless you're the sender of said message
+			messageData = messageData.filter(function (messageData) {
+				if (messageData.deleted && parseInt(messageData.fromuid, 10) !== parseInt(params.uid, 10)) {
+					return false;
+				}
+
+				return true;
+			});
+
 			next(null, messageData);
 		},
 	], callback);
@@ -76,6 +86,7 @@ Messaging.parse = function (message, fromuid, uid, roomId, isNew, callback) {
 		if (err) {
 			return callback(err);
 		}
+
 
 		var messageData = {
 			message: message,
@@ -152,23 +163,27 @@ Messaging.getRecentChats = function (callerUid, uid, start, stop, callback) {
 		},
 		function (results, next) {
 			results.roomData.forEach(function (room, index) {
-				room.users = results.users[index];
-				room.groupChat = room.hasOwnProperty('groupChat') ? room.groupChat : room.users.length > 2;
-				room.unread = results.unread[index];
-				room.teaser = results.teasers[index];
+				if (room) {
+					room.users = results.users[index];
+					room.groupChat = room.hasOwnProperty('groupChat') ? room.groupChat : room.users.length > 2;
+					room.unread = results.unread[index];
+					room.teaser = results.teasers[index];
 
-				room.users.forEach(function (userData) {
-					if (userData && parseInt(userData.uid, 10)) {
-						userData.status = user.getStatus(userData);
-					}
-				});
-				room.users = room.users.filter(function (user) {
-					return user && parseInt(user.uid, 10);
-				});
-				room.lastUser = room.users[0];
+					room.users.forEach(function (userData) {
+						if (userData && parseInt(userData.uid, 10)) {
+							userData.status = user.getStatus(userData);
+						}
+					});
+					room.users = room.users.filter(function (user) {
+						return user && parseInt(user.uid, 10);
+					});
+					room.lastUser = room.users[0];
 
-				room.usernames = Messaging.generateUsernames(room.users, uid);
+					room.usernames = Messaging.generateUsernames(room.users, uid);
+				}
 			});
+
+			results.roomData = results.roomData.filter(Boolean);
 
 			next(null, { rooms: results.roomData, nextStart: stop + 1 });
 		},
@@ -210,7 +225,8 @@ Messaging.getTeaser = function (uid, roomId, callback) {
 				return callback();
 			}
 			if (teaser.content) {
-				teaser.content = S(teaser.content).stripTags().decodeHTMLEntities().s;
+				teaser.content = utils.stripHTMLTags(utils.decodeHTMLEntities(teaser.content));
+				teaser.content = validator.escape(String(teaser.content));
 			}
 
 			teaser.timestampISO = utils.toISOString(teaser.timestamp);
@@ -256,11 +272,12 @@ Messaging.canMessageUser = function (uid, toUid, callback) {
 			async.parallel({
 				settings: async.apply(user.getSettings, toUid),
 				isAdmin: async.apply(user.isAdministrator, uid),
+				isModerator: async.apply(user.isModeratorOfAnyCategory, uid),
 				isFollowing: async.apply(user.isFollowing, toUid, uid),
 			}, next);
 		},
 		function (results, next) {
-			if (results.settings.restrictChat && !results.isAdmin && !results.isFollowing) {
+			if (results.settings.restrictChat && !results.isAdmin && !results.isModerator && !results.isFollowing) {
 				return next(new Error('[[error:chat-restricted]]'));
 			}
 

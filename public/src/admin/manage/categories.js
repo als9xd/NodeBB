@@ -1,7 +1,7 @@
 'use strict';
 
 
-define('admin/manage/categories', ['vendor/jquery/serializeObject/jquery.ba-serializeobject.min', 'translator'], function (serialize, translator) {
+define('admin/manage/categories', ['vendor/jquery/serializeObject/jquery.ba-serializeobject.min', 'translator', 'benchpress'], function (serialize, translator, Benchpress) {
 	var	Categories = {};
 	var newCategoryId = -1;
 	var sortables;
@@ -37,6 +37,20 @@ define('admin/manage/categories', ['vendor/jquery/serializeObject/jquery.ba-seri
 			el.find('i').toggleClass('fa-minus').toggleClass('fa-plus');
 			el.closest('[data-cid]').find('> ul[data-cid]').toggleClass('hidden');
 		});
+
+		$('#collapse-all').on('click', function () {
+			toggleAll(false);
+		});
+
+		$('#expand-all').on('click', function () {
+			toggleAll(true);
+		});
+
+		function toggleAll(expand) {
+			var el = $('.categories .toggle');
+			el.find('i').toggleClass('fa-minus', expand).toggleClass('fa-plus', !expand);
+			el.closest('[data-cid]').find('> ul[data-cid]').toggleClass('hidden', !expand);
+		}
 	};
 
 	Categories.throwCreateModal = function () {
@@ -45,7 +59,7 @@ define('admin/manage/categories', ['vendor/jquery/serializeObject/jquery.ba-seri
 				return app.alertError(err.message);
 			}
 
-			templates.parse('admin/partials/categories/create', {
+			Benchpress.parse('admin/partials/categories/create', {
 				categories: categories,
 			}, function (html) {
 				var modal = bootbox.dialog({
@@ -185,7 +199,7 @@ define('admin/manage/categories', ['vendor/jquery/serializeObject/jquery.ba-seri
 		}
 
 		function continueRender() {
-			templates.parse('admin/partials/categories/category-rows', {
+			Benchpress.parse('admin/partials/categories/category-rows', {
 				cid: parentId,
 				categories: categories,
 			}, function (html) {

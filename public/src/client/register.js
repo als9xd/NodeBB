@@ -16,6 +16,7 @@ define('forum/register', ['translator', 'zxcvbn'], function (translator, zxcvbn)
 		handleLanguageOverride();
 
 		$('#referrer').val(app.previousUrl);
+		$('#content #noscript').val('false');
 
 		email.on('blur', function () {
 			if (email.val().length) {
@@ -84,13 +85,17 @@ define('forum/register', ['translator', 'zxcvbn'], function (translator, zxcvbn)
 							return;
 						}
 						if (data.referrer) {
-							window.location.href = data.referrer;
+							var pathname = utils.urlToLocation(data.referrer).pathname;
+
+							var params = utils.params({ url: data.referrer });
+							params.registered = true;
+							var qs = decodeURIComponent($.param(params));
+
+							window.location.href = pathname + '?' + qs;
 						} else if (data.message) {
-							require(['translator'], function (translator) {
-								translator.translate(data.message, function (msg) {
-									bootbox.alert(msg);
-									ajaxify.go('/');
-								});
+							translator.translate(data.message, function (msg) {
+								bootbox.alert(msg);
+								ajaxify.go('/');
 							});
 						}
 					},
@@ -173,8 +178,8 @@ define('forum/register', ['translator', 'zxcvbn'], function (translator, zxcvbn)
 		var passwordStrength = zxcvbn(password);
 
 		if (password.length < ajaxify.data.minimumPasswordLength) {
-			showError(password_notify, '[[user:change_password_error_length]]');
-		} else if (password.length > 4096) {
+			showError(password_notify, '[[reset_password:password_too_short]]');
+		} else if (password.length > 512) {
 			showError(password_notify, '[[error:password-too-long]]');
 		} else if (!utils.isPasswordValid(password)) {
 			showError(password_notify, '[[user:change_password_error]]');

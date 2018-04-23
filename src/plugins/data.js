@@ -33,10 +33,10 @@ Data.getPluginPaths = getPluginPaths;
 function loadPluginInfo(pluginPath, callback) {
 	async.parallel({
 		package: function (next) {
-			fs.readFile(path.join(pluginPath, 'package.json'), next);
+			fs.readFile(path.join(pluginPath, 'package.json'), 'utf8', next);
 		},
 		plugin: function (next) {
-			fs.readFile(path.join(pluginPath, 'plugin.json'), next);
+			fs.readFile(path.join(pluginPath, 'plugin.json'), 'utf8', next);
 		},
 	}, function (err, results) {
 		if (err) {
@@ -44,9 +44,20 @@ function loadPluginInfo(pluginPath, callback) {
 		}
 		var pluginData;
 		var packageData;
+		var licenseData;
 		try {
 			pluginData = JSON.parse(results.plugin);
 			packageData = JSON.parse(results.package);
+			try {
+				licenseData = require('spdx-license-list/licenses/' + packageData.license);
+				pluginData.license = {
+					name: licenseData.name,
+					text: licenseData.licenseText,
+				};
+			} catch (e) {
+				// No license matched
+				pluginData.license = null;
+			}
 
 			pluginData.id = packageData.name;
 			pluginData.name = packageData.name;
@@ -58,7 +69,7 @@ function loadPluginInfo(pluginPath, callback) {
 		} catch (err) {
 			var pluginDir = path.basename(pluginPath);
 
-			winston.error('[plugins/' + pluginDir + '] Error in plugin.json or package.json! ' + err.message);
+			winston.error('[plugins/' + pluginDir + '] Error in plugin.json or package.json!', err);
 			return callback(new Error('[[error:parse-error]]'));
 		}
 
@@ -185,7 +196,7 @@ function getScripts(pluginData, target, callback) {
 	}
 
 	var scripts = [];
-	async.each(input, function (filePath, next) {
+	async.eachSeries(input, function (filePath, next) {
 		resolveModulePath(pluginData.path, filePath, function (err, modulePath) {
 			if (err) {
 				return next(err);

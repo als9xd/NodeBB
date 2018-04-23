@@ -20,6 +20,7 @@ image.resizeImage = function (data, callback) {
 			extension: data.extension,
 			width: data.width,
 			height: data.height,
+			quality: data.quality,
 		}, function (err) {
 			callback(err);
 		});
@@ -36,6 +37,10 @@ image.resizeImage = function (data, callback) {
 			var x = 0;
 			var y = 0;
 			var crop;
+
+			if (image._exif && image._exif.tags && image._exif.tags.Orientation) {
+				image.exifRotate();
+			}
 
 			if (origRatio !== desiredRatio) {
 				if (desiredRatio > origRatio) {
@@ -70,6 +75,9 @@ image.resizeImage = function (data, callback) {
 					}
 				},
 				function (image, next) {
+					if (data.quality) {
+						image.quality(data.quality);
+					}
 					image.write(data.target || data.path, next);
 				},
 			], function (err) {
@@ -116,9 +124,7 @@ image.size = function (path, callback) {
 };
 
 image.convertImageToBase64 = function (path, callback) {
-	fs.readFile(path, function (err, data) {
-		callback(err, data ? data.toString('base64') : null);
-	});
+	fs.readFile(path, 'base64', callback);
 };
 
 image.mimeFromBase64 = function (imageData) {
@@ -137,7 +143,7 @@ image.writeImageDataToTempFile = function (imageData, callback) {
 
 	var filepath = path.join(os.tmpdir(), filename + extension);
 
-	var buffer = new Buffer(imageData.slice(imageData.indexOf('base64') + 7), 'base64');
+	var buffer = Buffer.from(imageData.slice(imageData.indexOf('base64') + 7), 'base64');
 
 	fs.writeFile(filepath, buffer, {
 		encoding: 'base64',

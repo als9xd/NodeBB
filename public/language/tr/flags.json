@@ -22,7 +22,7 @@
 	"filter-assignee": "Vekil UID",
 	"filter-cid": "Kategori",
 	"filter-quick-mine": "Vekil atandı",
-	"filter-cid-all": "Bütün Kategoriler",
+	"filter-cid-all": "Tüm kategoriler",
 	"apply-filters": "Filtreleri Onayla",
 
 	"quick-links": "Akıllı Bağlantılar",
@@ -54,7 +54,11 @@
 	"modal-body": "%1 %2 için bayraklama nedenini belirtin. Alternatif olarak hızlı rapor butonlarından birinini kullanabilirsin.",
 	"modal-reason-spam": "Gereksiz",
 	"modal-reason-offensive": "Saldırgan",
+	"modal-reason-other": "Diğer (aşağıda belirtin)",
 	"modal-reason-custom": "Bir içeriği bildirme nedeni...",
 	"modal-submit": "Raporu Gönder",
-	"modal-submit-success": "İçerik, denetlemek için bayraklandı."
+	"modal-submit-success": "İçerik, denetlemek için bayraklandı.",
+	"modal-submit-confirm": "Gönderimi Onayla",
+	"modal-submit-confirm-text": "Zaten belirtilen özel bir sebebin var. Hızlı raporla göndermek istediğinizden emin misin?",
+	"modal-submit-confirm-text-help": "Hızlı bir rapor göndermek tanımlanan özel nedenlerin üzerine yazacaktır."
 }

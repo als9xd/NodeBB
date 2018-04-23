@@ -11,8 +11,20 @@ var plugins = require('../plugins');
 var utils = require('../utils');
 
 module.exports = function (User) {
-	var iconBackgrounds = ['#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3',
-		'#009688', '#1b5e20', '#33691e', '#827717', '#e65100', '#ff5722', '#795548', '#607d8b'];
+	var iconBackgrounds = [
+		'#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3',
+		'#009688', '#1b5e20', '#33691e', '#827717', '#e65100', '#ff5722',
+		'#795548', '#607d8b',
+	];
+
+	var fieldWhitelist = [
+		'uid', 'username', 'userslug', 'email', 'email:confirmed', 'joindate',
+		'lastonline', 'picture', 'fullname', 'location', 'birthday', 'website',
+		'aboutme', 'signature', 'uploadedpicture', 'profileviews', 'reputation',
+		'postcount', 'topiccount', 'lastposttime', 'banned', 'banned:expire',
+		'status', 'flags', 'followerCount', 'followingCount', 'cover:url',
+		'cover:position', 'groupTitle',
+	];
 
 	User.getUserField = function (uid, field, callback) {
 		User.getUserFields(uid, [field], function (err, user) {
@@ -48,7 +60,6 @@ module.exports = function (User) {
 		}
 
 		if (fields.indexOf('picture') !== -1) {
-			addField('email');
 			addField('uploadedpicture');
 		}
 
@@ -62,11 +73,22 @@ module.exports = function (User) {
 
 		async.waterfall([
 			function (next) {
+				plugins.fireHook('filter:user.whitelistFields', { uids: uids, whitelist: fieldWhitelist.slice() }, next);
+			},
+			function (results, next) {
 				if (fields.length) {
-					db.getObjectsFields(uidsToUserKeys(uniqueUids), fields, next);
+					fields = fields.filter(function (field) {
+						var isFieldWhitelisted = field && results.whitelist.includes(field);
+						if (!isFieldWhitelisted) {
+							winston.verbose('[user/getUsersFields] ' + field + ' removed because it is not whitelisted, see `filter:user.whietlistFields`');
+						}
+						return isFieldWhitelisted;
+					});
 				} else {
-					db.getObjects(uidsToUserKeys(uniqueUids), next);
+					fields = results.whitelist;
 				}
+
+				db.getObjectsFields(uidsToUserKeys(uniqueUids), fields, next);
 			},
 			function (users, next) {
 				users = uidsToUsers(uids, uniqueUids, users);
@@ -118,14 +140,6 @@ module.exports = function (User) {
 				user.username = validator.escape(user.username ? user.username.toString() : '');
 			}
 
-			if (user.password) {
-				user.password = undefined;
-			}
-
-			if (user.rss_token) {
-				user.rss_token = undefined;
-			}
-
 			if (!parseInt(user.uid, 10)) {
 				user.uid = 0;
 				user.username = '[[global:guest]]';
@@ -167,6 +181,11 @@ module.exports = function (User) {
 
 			if (user.hasOwnProperty('lastonline')) {
 				user.lastonlineISO = utils.toISOString(user.lastonline) || user.joindateISO;
+			}
+
+			if (user.hasOwnProperty('banned:expire')) {
+				user.banned_until = parseInt(user['banned:expire'], 10) || 0;
+				user.banned_until_readable = user.banned_until ? new Date(user.banned_until).toString() : 'Not Banned';
 			}
 		});
 

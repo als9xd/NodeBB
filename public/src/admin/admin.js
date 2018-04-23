@@ -31,8 +31,6 @@
 	}
 
 	$(document).ready(function () {
-		setupKeybindings();
-
 		if (!/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
 			require(['admin/modules/search'], function (search) {
 				search.init();
@@ -40,7 +38,6 @@
 		}
 
 		$('[component="logout"]').on('click', app.logout);
-		app.alert = launchSnackbar;
 
 		configureSlidemenu();
 		setupNProgress();
@@ -63,24 +60,6 @@
 		});
 	}
 
-	function setupKeybindings() {
-		require(['mousetrap', 'admin/modules/instance'], function (mousetrap, instance) {
-			mousetrap.bind('ctrl+shift+a r', function () {
-				instance.reload();
-			});
-
-			mousetrap.bind('ctrl+shift+a R', function () {
-				socket.emit('admin.restart');
-			});
-
-			mousetrap.bind('/', function () {
-				$('#acp-search input').focus();
-
-				return false;
-			});
-		});
-	}
-
 	function selectMenuItem(url) {
 		require(['translator'], function (translator) {
 			url = url
@@ -99,6 +78,10 @@
 			$('#main-menu li').removeClass('active');
 			$('#main-menu a').removeClass('active').filter('[href="' + url + '"]').each(function () {
 				var menu = $(this);
+				if (menu.parent().attr('data-link')) {
+					return;
+				}
+
 				menu
 					.parent().addClass('active')
 					.parents('.menu-item').addClass('active');
@@ -136,11 +119,11 @@
 	}
 
 	function setupRestartLinks() {
-		$('.reload').off('click').on('click', function () {
-			bootbox.confirm('[[admin/admin:alert.confirm-reload]]', function (confirm) {
+		$('.rebuild-and-restart').off('click').on('click', function () {
+			bootbox.confirm('[[admin/admin:alert.confirm-rebuild-and-restart]]', function (confirm) {
 				if (confirm) {
 					require(['admin/modules/instance'], function (instance) {
-						instance.reload();
+						instance.rebuildAndRestart();
 					});
 				}
 			});
@@ -152,24 +135,6 @@
 					require(['admin/modules/instance'], function (instance) {
 						instance.restart();
 					});
-				}
-			});
-		});
-	}
-
-	function launchSnackbar(params) {
-		var message = (params.title ? '<strong>' + params.title + '</strong>' : '') + (params.message ? params.message : '');
-
-		require(['translator'], function (translator) {
-			translator.translate(message, function (html) {
-				var bar = $.snackbar({
-					content: html,
-					timeout: params.timeout || 3000,
-					htmlAllowed: true,
-				});
-
-				if (params.clickfn) {
-					bar.on('click', params.clickfn);
 				}
 			});
 		});

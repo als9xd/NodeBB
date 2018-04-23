@@ -41,6 +41,8 @@ function searchInContent(data, callback) {
 	data.uid = data.uid || 0;
 	var matchCount = 0;
 	var pids;
+	var metadata;
+	var itemsPerPage = data.itemsPerPage || 10;
 	async.waterfall([
 		function (next) {
 			async.parallel({
@@ -54,8 +56,14 @@ function searchInContent(data, callback) {
 		},
 		function (results, next) {
 			function doSearch(type, searchIn, next) {
-				if (searchIn.indexOf(data.searchIn) !== -1) {
-					search.searchQuery(type, data.query, results.searchCids, results.searchUids, next);
+				if (searchIn.includes(data.searchIn)) {
+					plugins.fireHook('filter:search.query', {
+						index: type,
+						content: data.query,
+						matchWords: data.matchWords || 'all',
+						cid: results.searchCids,
+						uid: results.searchUids,
+					}, next);
 				} else {
 					next(null, []);
 				}
@@ -88,16 +96,29 @@ function searchInContent(data, callback) {
 			filterAndSort(pids, data, next);
 		},
 		function (pids, next) {
-			matchCount = pids.length;
+			plugins.fireHook('filter:search.inContent', {
+				pids: pids,
+			}, next);
+		},
+		function (_metadata, next) {
+			metadata = _metadata;
+			matchCount = metadata.pids.length;
+
 			if (data.page) {
-				var start = Math.max(0, (data.page - 1)) * 10;
-				pids = pids.slice(start, start + 10);
+				var start = Math.max(0, (data.page - 1)) * itemsPerPage;
+				metadata.pids = metadata.pids.slice(start, start + itemsPerPage);
 			}
 
-			posts.getPostSummaryByPids(pids, data.uid, {}, next);
+			posts.getPostSummaryByPids(metadata.pids, data.uid, {}, next);
 		},
 		function (posts, next) {
-			next(null, { posts: posts, matchCount: matchCount, pageCount: Math.max(1, Math.ceil(parseInt(matchCount, 10) / 10)) });
+			// Append metadata to returned payload (without pids)
+			delete metadata.pids;
+			next(null, Object.assign({
+				posts: posts,
+				matchCount: matchCount,
+				pageCount: Math.max(1, Math.ceil(parseInt(matchCount, 10) / 10)),
+			}, metadata));
 		},
 	], callback);
 }
@@ -119,7 +140,10 @@ function filterAndSort(pids, data, callback) {
 
 			sortPosts(posts, data);
 
-			pids = posts.map(function (post) {
+			plugins.fireHook('filter:search.filterAndSort', { pids: pids, posts: posts, data: data }, next);
+		},
+		function (result, next) {
+			pids = result.posts.map(function (post) {
 				return post && post.pid;
 			});
 
@@ -129,25 +153,12 @@ function filterAndSort(pids, data, callback) {
 }
 
 function getMatchedPosts(pids, data, callback) {
-	var postFields = ['pid', 'tid', 'timestamp', 'deleted'];
-	var topicFields = ['deleted'];
+	var postFields = ['pid', 'uid', 'tid', 'timestamp', 'deleted'];
 	var categoryFields = [];
 
-	if (data.replies) {
-		topicFields.push('postcount');
-	}
-
 	if (data.sortBy && data.sortBy !== 'relevance') {
-		if (data.sortBy.startsWith('category')) {
-			topicFields.push('cid');
-		} else if (data.sortBy.startsWith('topic.')) {
-			topicFields.push(data.sortBy.split('.')[1]);
-		} else if (data.sortBy.startsWith('user.')) {
-			postFields.push('uid');
-		} else if (data.sortBy.startsWith('category.')) {
+		if (data.sortBy.startsWith('category.')) {
 			categoryFields.push(data.sortBy.split('.')[1]);
-		} else if (data.sortBy.startsWith('teaser')) {
-			topicFields.push('teaserPid');
 		}
 	}
 
@@ -157,7 +168,6 @@ function getMatchedPosts(pids, data, callback) {
 			var keys = pids.map(function (pid) {
 				return 'post:' + pid;
 			});
-
 			db.getObjectsFields(keys, postFields, next);
 		},
 		function (_posts, next) {
@@ -183,14 +193,14 @@ function getMatchedPosts(pids, data, callback) {
 							var topicKeys = posts.map(function (post) {
 								return 'topic:' + post.tid;
 							});
-							db.getObjectsFields(topicKeys, topicFields, next);
+							db.getObjects(topicKeys, next);
 						},
 						function (_topics, next) {
 							topicsData = _topics;
 
 							async.parallel({
 								teasers: function (next) {
-									if (topicFields.indexOf('teaserPid') !== -1) {
+									if (data.sortBy && data.sortBy.startsWith('teaser')) {
 										var teaserKeys = topicsData.map(function (topic) {
 											return 'post:' + topic.teaserPid;
 										});
@@ -209,7 +219,7 @@ function getMatchedPosts(pids, data, callback) {
 									db.getObjectsFields(cids, categoryFields, next);
 								},
 								tags: function (next) {
-									if (data.hasTags && data.hasTags.length) {
+									if (Array.isArray(data.hasTags) && data.hasTags.length) {
 										var tids = posts.map(function (post) {
 											return post && post.tid;
 										});
@@ -299,10 +309,10 @@ function filterByTimerange(posts, timeRange, timeFilter) {
 }
 
 function filterByTags(posts, hasTags) {
-	if (hasTags && hasTags.length) {
+	if (Array.isArray(hasTags) && hasTags.length) {
 		posts = posts.filter(function (post) {
 			var hasAllTags = false;
-			if (post && post.topic && post.topic.tags && post.topic.tags.length) {
+			if (post && post.topic && Array.isArray(post.topic.tags) && post.topic.tags.length) {
 				hasAllTags = hasTags.every(function (tag) {
 					return post.topic.tags.indexOf(tag) !== -1;
 				});
@@ -426,13 +436,3 @@ function getSearchUids(data, callback) {
 		callback(null, []);
 	}
 }
-
-search.searchQuery = function (index, content, cids, uids, callback) {
-	plugins.fireHook('filter:search.query', {
-		index: index,
-		content: content,
-		cid: cids,
-		uid: uids,
-	}, callback);
-};
-

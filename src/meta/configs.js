@@ -3,6 +3,8 @@
 
 var async = require('async');
 var nconf = require('nconf');
+var path = require('path');
+var winston = require('winston');
 
 var db = require('../database');
 var pubsub = require('../pubsub');
@@ -14,23 +16,19 @@ var Configs = module.exports;
 Meta.config = {};
 
 Configs.init = function (callback) {
-	Meta.config = null;
-
+	var config;
 	async.waterfall([
 		function (next) {
 			Configs.list(next);
 		},
-		function (config, next) {
-			cacheBuster.read(function (err, buster) {
-				if (err) {
-					return next(err);
-				}
-
-				config['cache-buster'] = 'v=' + (buster || Date.now());
-
-				Meta.config = config;
-				next();
-			});
+		function (_config, next) {
+			config = _config;
+			cacheBuster.read(next);
+		},
+		function (buster, next) {
+			config['cache-buster'] = 'v=' + (buster || Date.now());
+			Meta.config = config;
+			next();
 		},
 	], callback);
 };
@@ -80,13 +78,41 @@ Configs.setMultiple = function (data, callback) {
 };
 
 function processConfig(data, callback) {
-	if (data.customCSS) {
-		return saveRenderedCss(data, callback);
-	}
-	setImmediate(callback);
+	async.parallel([
+		async.apply(saveRenderedCss, data),
+		function (next) {
+			var image = require('../image');
+			if (data['brand:logo']) {
+				image.size(path.join(nconf.get('upload_path'), 'system', 'site-logo-x50.png'), function (err, size) {
+					if (err && err.code === 'ENOENT') {
+						// For whatever reason the x50 logo wasn't generated, gracefully error out
+						winston.warn('[logo] The email-safe logo doesn\'t seem to have been created, please re-upload your site logo.');
+						size = {
+							height: 0,
+							width: 0,
+						};
+					} else if (err) {
+						return next(err);
+					}
+
+					data['brand:emailLogo:height'] = size.height;
+					data['brand:emailLogo:width'] = size.width;
+					next();
+				});
+			} else {
+				setImmediate(next);
+			}
+		},
+	], function (err) {
+		callback(err);
+	});
 }
 
 function saveRenderedCss(data, callback) {
+	if (!data.customCSS) {
+		return setImmediate(callback);
+	}
+
 	var less = require('less');
 	async.waterfall([
 		function (next) {
@@ -107,11 +133,7 @@ function updateConfig(config) {
 }
 
 function updateLocalConfig(config) {
-	for (var field in config) {
-		if (config.hasOwnProperty(field)) {
-			Meta.config[field] = config[field];
-		}
-	}
+	Object.assign(Meta.config, config);
 }
 
 pubsub.on('config:update', function onConfigReceived(config) {

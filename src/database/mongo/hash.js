@@ -1,7 +1,42 @@
 'use strict';
 
+var async = require('async');
+var pubsub = require('../../pubsub');
+
 module.exports = function (db, module) {
 	var helpers = module.helpers.mongo;
+
+	var LRU = require('lru-cache');
+	var _ = require('lodash');
+
+	var cache = LRU({
+		max: 10000,
+		length: function () { return 1; },
+		maxAge: 0,
+	});
+
+	cache.misses = 0;
+	cache.hits = 0;
+	module.objectCache = cache;
+
+	pubsub.on('mongo:hash:cache:del', function (key) {
+		cache.del(key);
+	});
+
+	pubsub.on('mongo:hash:cache:reset', function () {
+		cache.reset();
+	});
+
+	module.delObjectCache = function (key) {
+		pubsub.publish('mongo:hash:cache:del', key);
+		cache.del(key);
+	};
+
+	module.resetObjectCache = function () {
+		pubsub.publish('mongo:hash:cache:reset');
+		cache.reset();
+	};
+
 
 	module.setObject = function (key, data, callback) {
 		callback = callback || helpers.noop;
@@ -12,7 +47,11 @@ module.exports = function (db, module) {
 			delete data[''];
 		}
 		db.collection('objects').update({ _key: key }, { $set: data }, { upsert: true, w: 1 }, function (err) {
-			callback(err);
+			if (err) {
+				return callback(err);
+			}
+			module.delObjectCache(key);
+			callback();
 		});
 	};
 
@@ -31,26 +70,56 @@ module.exports = function (db, module) {
 		if (!key) {
 			return callback();
 		}
-		db.collection('objects').findOne({ _key: key }, { _id: 0, _key: 0 }, callback);
+
+		module.getObjects([key], function (err, data) {
+			if (err) {
+				return callback(err);
+			}
+			callback(null, data && data.length ? data[0] : null);
+		});
 	};
 
 	module.getObjects = function (keys, callback) {
+		var cachedData = {};
+		function getFromCache() {
+			process.nextTick(callback, null, keys.map(function (key) {
+				return _.clone(cachedData[key]);
+			}));
+		}
+
 		if (!Array.isArray(keys) || !keys.length) {
 			return callback(null, []);
 		}
-		db.collection('objects').find({ _key: { $in: keys } }, { _id: 0 }).toArray(function (err, data) {
+
+		var nonCachedKeys = keys.filter(function (key) {
+			var data = cache.get(key);
+			if (data !== undefined) {
+				cachedData[key] = data;
+			}
+			return data === undefined;
+		});
+
+		var hits = keys.length - nonCachedKeys.length;
+		var misses = keys.length - hits;
+		cache.hits += hits;
+		cache.misses += misses;
+
+		if (!nonCachedKeys.length) {
+			return getFromCache();
+		}
+
+		db.collection('objects').find({ _key: { $in: nonCachedKeys } }, { _id: 0 }).toArray(function (err, data) {
 			if (err) {
 				return callback(err);
 			}
 
 			var map = helpers.toMap(data);
-			var returnData = [];
+			nonCachedKeys.forEach(function (key) {
+				cachedData[key] = map[key] || null;
+				cache.set(key, cachedData[key]);
+			});
 
-			for (var i = 0; i < keys.length; i += 1) {
-				returnData.push(map[keys[i]]);
-			}
-
-			callback(null, returnData);
+			getFromCache();
 		});
 	};
 
@@ -58,16 +127,10 @@ module.exports = function (db, module) {
 		if (!key) {
 			return callback();
 		}
-		field = helpers.fieldToString(field);
-		var _fields = {
-			_id: 0,
-		};
-		_fields[field] = 1;
-		db.collection('objects').findOne({ _key: key }, { fields: _fields }, function (err, item) {
+		module.getObject(key, function (err, item) {
 			if (err || !item) {
 				return callback(err, null);
 			}
-
 			callback(null, item.hasOwnProperty(field) ? item[field] : null);
 		});
 	};
@@ -76,22 +139,13 @@ module.exports = function (db, module) {
 		if (!key) {
 			return callback();
 		}
-		var _fields = {
-			_id: 0,
-		};
-		var i;
-
-		for (i = 0; i < fields.length; i += 1) {
-			fields[i] = helpers.fieldToString(fields[i]);
-			_fields[fields[i]] = 1;
-		}
-		db.collection('objects').findOne({ _key: key }, { fields: _fields }, function (err, item) {
+		module.getObject(key, function (err, item) {
 			if (err) {
 				return callback(err);
 			}
 			item = item || {};
 			var result = {};
-			for (i = 0; i < fields.length; i += 1) {
+			for (var i = 0; i < fields.length; i += 1) {
 				result[fields[i]] = item[fields[i]] !== undefined ? item[fields[i]] : null;
 			}
 			callback(null, result);
@@ -102,38 +156,24 @@ module.exports = function (db, module) {
 		if (!Array.isArray(keys) || !keys.length) {
 			return callback(null, []);
 		}
-		var _fields = {
-			_id: 0,
-			_key: 1,
-		};
-
-		for (var i = 0; i < fields.length; i += 1) {
-			fields[i] = helpers.fieldToString(fields[i]);
-			_fields[fields[i]] = 1;
-		}
-
-		db.collection('objects').find({ _key: { $in: keys } }, { fields: _fields }).toArray(function (err, items) {
+		module.getObjects(keys, function (err, items) {
 			if (err) {
 				return callback(err);
 			}
-
 			if (items === null) {
 				items = [];
 			}
 
-			var map = helpers.toMap(items);
 			var returnData = [];
 			var item;
-
+			var result;
 			for (var i = 0; i < keys.length; i += 1) {
-				item = map[keys[i]] || {};
-
+				item = items[i] || {};
+				result = {};
 				for (var k = 0; k < fields.length; k += 1) {
-					if (item[fields[k]] === undefined) {
-						item[fields[k]] = null;
-					}
+					result[fields[k]] = item[fields[k]] !== undefined ? item[fields[k]] : null;
 				}
-				returnData.push(item);
+				returnData.push(result);
 			}
 
 			callback(null, returnData);
@@ -220,7 +260,11 @@ module.exports = function (db, module) {
 		});
 
 		db.collection('objects').update({ _key: key }, { $unset: data }, function (err) {
-			callback(err);
+			if (err) {
+				return callback(err);
+			}
+			module.delObjectCache(key);
+			callback();
 		});
 	};
 
@@ -236,15 +280,49 @@ module.exports = function (db, module) {
 		callback = callback || helpers.noop;
 		value = parseInt(value, 10);
 		if (!key || isNaN(value)) {
-			return callback();
+			return callback(null, null);
 		}
 
 		var data = {};
 		field = helpers.fieldToString(field);
 		data[field] = value;
 
+		if (Array.isArray(key)) {
+			var bulk = db.collection('objects').initializeUnorderedBulkOp();
+			key.forEach(function (key) {
+				bulk.find({ _key: key }).upsert().update({ $inc: data });
+			});
+
+			async.waterfall([
+				function (next) {
+					bulk.execute(function (err) {
+						next(err);
+					});
+				},
+				function (next) {
+					key.forEach(function (key) {
+						module.delObjectCache(key);
+					});
+
+					module.getObjectsFields(key, [field], next);
+				},
+				function (data, next) {
+					data = data.map(function (data) {
+						return data && data[field];
+					});
+					next(null, data);
+				},
+			], callback);
+			return;
+		}
+
+
 		db.collection('objects').findAndModify({ _key: key }, {}, { $inc: data }, { new: true, upsert: true }, function (err, result) {
-			callback(err, result && result.value ? result.value[field] : null);
+			if (err) {
+				return callback(err);
+			}
+			module.delObjectCache(key);
+			callback(null, result && result.value ? result.value[field] : null);
 		});
 	};
 };
