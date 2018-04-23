@@ -39,9 +39,12 @@ if (nconf.get('ssl')) {
 		key: fs.readFileSync(nconf.get('ssl').key),
 		cert: fs.readFileSync(nconf.get('ssl').cert),
 	}, app);
-} else {
-	server = require('http').createServer(app);
 }
+
+let http_port = 80;
+require('http').createServer(app).listen(http_port,()=>{
+	winston.info('NodeBB is now listening on: 0.0.0.0:' + http_port);
+});
 
 module.exports.server = server;
 
@@ -171,6 +174,13 @@ function setupExpressApp(app, callback) {
 
 	app.use(compression());
 
+        app.all('*',function(req,res,next){
+                if(req.secure){
+                        return next();
+                }
+                res.redirect('https://'+req.hostname+req.url);
+        });
+	
 	app.get(relativePath + '/ping', pingController.ping);
 	app.get(relativePath + '/sping', pingController.ping);
 
